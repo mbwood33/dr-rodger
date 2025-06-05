@@ -1,0 +1,22 @@
+{
+    "name": "dr-rodger",
+    "version": "1.0.0",
+    "description": "A Dr. Mario clone but gay",
+    "main": "index.js",
+    "scripts": {
+        "start": "vite",
+        "build": "tsc && vite build",
+        "preview": "vite preview"
+    },
+    "keywords": ["game", "excalibur", "dr-mario", "puzzle", "LGBTQIA+", "LGBTQ", "bear"],
+    "author": "Michael Wood",
+    "license": "MIT",
+    "devDependencies": {
+        "@types/node": "^20.0.0",
+        "typescript": "5.8.3",
+        "vite": "^5.0.0"
+    },
+    "dependencies": {
+        "excalibur": "0.30.3"
+    }
+}

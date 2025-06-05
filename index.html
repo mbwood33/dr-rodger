@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Dr. Rodger</title>
+        <style>
+            body {
+                margin: 0;
+                padding: 0;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: 100vh;  /* Full viewport height */
+                background-color: #1a1a2e; /* Dark background */
+                font-family: Ariel, sans-serif;
+                overflow: hidden;
+            }
+
+            #game {
+                border: 3px solid #FF00AA;
+                box-shadow: 0 0 20px rgba(255, 0, 170, 0.5);
+                max-width: 100vw;
+                max-height: calc(100vh - 100px);    /* Leave room for title */
+            }
+
+            h1 {
+                color: #FF00AA;
+                text-align: center;
+                margin: 20px 0;
+                text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+                font-size: 2em;
+            }
+
+            .game-wrapper {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                height: 100vh;
+                padding: 10px;
+                box-sizing: border-box;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="game-wrapper">
+            <h1>Dr. Rodger</h1>
+            <canvas id="game"></canvas>
+        </div>
+        <script type="module" src="/src/main.ts"></script>
+    </body>
+</html>
