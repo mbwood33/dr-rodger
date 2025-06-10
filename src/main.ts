@@ -2,6 +2,7 @@
 
 // Import Excalibur game engine and configurations
 import { Engine, DisplayMode, Color } from 'excalibur';
+import { Resources } from './resources/Resources';
 import { GameConfig } from './config/GameConfig';
 import { MainMenuScene } from './scenes/MainMenuScene';
 import { GameScene } from './scenes/GameScene';
@@ -24,7 +25,7 @@ function createGame(): Engine {
         displayMode: DisplayMode.FitScreen,     // To scale the game to fit the container, which maintains aspect ratio and centers the game
         backgroundColor: Color.fromHex(GameConfig.COLORS.BACKGROUND),   // Set the background color to our dark theme
         antialiasing: false,                    // Disable anti-aliasing for crisp pixel art
-        canvasElement: canvas,                // Attach the game canvas to our HTML container
+        canvasElement: canvas,                  // Attach the game canvas to our HTML container
         suppressPlayButton: true                // Disable the default Excalibur loader (we'll make our own later)
     });
 
@@ -51,10 +52,11 @@ function setupScenes(game: Engine): void {
  * Main entry point for the game - initializes and starts everything
  */
 async function main(): Promise<void> {
-    const game = createGame();                  // Create the game engine
-    setupScenes(game);                          // Set up all the game scenes
-    await game.start();                         // Start the game engine
-    game.goToScene('mainMenu');                 // Go to the main menu scene
+    const game = createGame();      // Create the game engine
+    setupScenes(game);              // Set up all the game scenes
+    await game.start(Resources.ResourceLoader); // Start the game engine and load resources using the ResourceLoader
+    Resources.initialize();         // After resources are loaded, initialize the SpriteSheet
+    game.goToScene('mainMenu');     // Go to the main menu scene
     console.log('Dr. Rodger game started! 🏳️‍🌈'); // Log to console that the game has started successfully
 }
 

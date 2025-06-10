@@ -17,7 +17,7 @@ export class GameConfig {
 
     // Size of each tile/block in pixels
     // This determines how big each pathogen and capsule piece appears
-    public static readonly TILE_SIZE = 24;
+    public static readonly TILE_SIZE = 32;
 
     // The "neck" of the bottle starts at row 3 (0-indexed)
     // If capsules reach this height, it's game over

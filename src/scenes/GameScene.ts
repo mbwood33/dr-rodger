@@ -2,6 +2,8 @@
 
 import { Scene, Engine, Color, Actor, Rectangle, vec, Vector } from 'excalibur';
 import { GameConfig } from '../config/GameConfig';
+import { GameGrid } from '../game/GameGrid';
+import { Pathogen } from '../entities/Pathogen';
 
 /**
  * The main gameplay scene
@@ -17,6 +19,9 @@ export class GameScene extends Scene {
     private fieldX: number = 0;
     private fieldY: number = 0;
 
+    // Game grid to track what's in each cell
+    private grid: GameGrid = new GameGrid();
+    
     /**
      * Called once when the scene is first initialized
      * @param engine The game engine instance
@@ -48,7 +53,8 @@ export class GameScene extends Scene {
         console.log(`Game started! Level: ${this.level}, Speed: ${this.speed}`);
         console.log(`Need to clear ${GameConfig.PATHOGENS_PER_LEVEL(this.level)} pathogens`);
 
-        // TODO: Initialize pathogens, start gameplay
+        this.clearField();  // Clear any existing pathogens
+        this.generatePathogens();   // Generate random pathogens for this level
     }
 
     /**
@@ -143,6 +149,72 @@ export class GameScene extends Scene {
             color: borderColor
         }));
         this.add(rightBorder);
+    }
+
+    /**
+     * Removes all entities from the playing field
+     */
+    private clearField(): void {
+        // Get all pathogens from the grid
+        const pathogens = this.grid.getPathogens();
+
+        // Remove each pathogen from the scene
+        pathogens.forEach(pathogen => {
+            this.remove(pathogen);
+            pathogen.kill();
+        });
+
+        // Clear the grid
+        this.grid.clear();
+    }
+
+    /**
+     * Generates random pathogens for the current level
+     */
+    private generatePathogens(): void {
+        const pathogenCount = GameConfig.PATHOGENS_PER_LEVEL(this.level);
+        
+        // Keep track of occupied positions to avoid overlaps
+        const occupiedPositions = new Set<string>();
+
+        let placed = 0;
+        let attemps = 0;
+        const maxAttempts = 1000;   // Prevent infinite loop
+
+        while (placed < pathogenCount && attemps < maxAttempts) {
+            attemps++;
+
+            // Random position in the lower 2/3 of the field
+            // We don't want pathogens too high at the start
+            const col = Math.floor(Math.random() * GameConfig.FIELD_WIDTH);
+            const row = Math.floor(Math.random() * 10) + 6; // Rows 6-15
+            // TODO: Implement mechanic where the pathogens grow higher as the level increases
+
+            // Check if position is already occupied
+            const posKey = `${col},${row}`;
+            if (occupiedPositions.has(posKey)) {
+                continue;
+            }
+
+            // Random color
+            const colorIndex = Math.floor(Math.random() * 3);
+
+            // Create the pathogen
+            const pathogen = new Pathogen(colorIndex, col, row);
+
+            // Position it on screen
+            pathogen.pos = this.gridToScreen(col, row);
+
+            // Add to grid and scene
+            this.grid.set(col, row, pathogen);
+            this.add(pathogen);
+
+            // Mark position as occupied
+            occupiedPositions.add(posKey);
+            placed++;
+        }
+
+        console.log(`Placed ${placed} pathogens on the field`);
     }
 
     /**
