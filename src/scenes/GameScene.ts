@@ -4,6 +4,7 @@ import { Scene, Engine, Color, Actor, Rectangle, vec, Vector } from 'excalibur';
 import { GameConfig } from '../config/GameConfig';
 import { GameGrid } from '../game/GameGrid';
 import { Pathogen } from '../entities/Pathogen';
+import { Capsule } from '../entities/Capsule';
 
 /**
  * The main gameplay scene
@@ -21,6 +22,9 @@ export class GameScene extends Scene {
 
     // Game grid to track what's in each cell
     private grid: GameGrid = new GameGrid();
+
+    // Current falling capsule
+    private currentCapsule: Capsule | null = null;
     
     /**
      * Called once when the scene is first initialized
@@ -55,6 +59,7 @@ export class GameScene extends Scene {
 
         this.clearField();  // Clear any existing pathogens
         this.generatePathogens();   // Generate random pathogens for this level
+        this.spawnNewCapsule(); // Spawn the first capsule
     }
 
     /**
@@ -318,5 +323,40 @@ export class GameScene extends Scene {
         }
 
         return null;    // Outside the grid
+    }
+
+    /**
+     * Spawns a new capsule at the top of the field
+     */
+    private spawnNewCapsule(): void {
+        // Random colors for both halves
+        const color1 = Math.floor(Math.random() * 3);
+        const color2 = Math.floor(Math.random() * 3);        
+        
+        // Create new capsule
+        this.currentCapsule = new Capsule(color1, color2, 'horizontal');
+
+        // Start at the top center of the field
+        const startCol = Math.floor(GameConfig.FIELD_WIDTH / 2) - 1;
+        const startRow = 0;
+
+        // Set position
+        this.currentCapsule.setGridPosition(startCol, startRow);
+
+        // Update visual positions
+        this.currentCapsule.half1.pos = this.gridToScreen(
+            this.currentCapsule.half1.gridCol,
+            this.currentCapsule.half1.gridRow
+        );
+        this.currentCapsule.half2.pos = this.gridToScreen(
+            this.currentCapsule.half2.gridCol,
+            this.currentCapsule.half2.gridRow
+        );
+
+        // Add to scene
+        this.add(this.currentCapsule);
+
+        // Don't add to grid yet - it's falling
+        console.log(`Spawned new capsule with colors ${color1} and ${color2}`);
     }
 }

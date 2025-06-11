@@ -3,11 +3,12 @@
 
 import { GameConfig } from "../config/GameConfig";
 import { Pathogen } from "../entities/Pathogen";
+import { CapsuleHalf } from "../entities/Capsule";
 
 /**
  * Represents what can be in a grid cell
  */
-type GridCell = Pathogen | null;
+type GridCell = Pathogen | CapsuleHalf | null;
 
 /**
  * Manages the game playing field grid and what's in each cell
