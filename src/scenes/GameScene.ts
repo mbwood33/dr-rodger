@@ -1,6 +1,6 @@
 // src/scenes/GameScene.ts
 
-import { Scene, Engine, Color, Actor, Rectangle, vec, Vector } from 'excalibur';
+import { Scene, Engine, Color, Actor, Rectangle, vec, Vector, Keys, KeyEvent, Text, Font } from 'excalibur';
 import { GameConfig } from '../config/GameConfig';
 import { GameGrid } from '../game/GameGrid';
 import { Pathogen } from '../entities/Pathogen';
@@ -25,6 +25,14 @@ export class GameScene extends Scene {
 
     // Current falling capsule
     private currentCapsule: Capsule | null = null;
+
+    // Input handling
+    private keyHeldTime: Map<Keys, number> = new Map();
+    private keyRepeatTime: Map<Keys, number> = new Map();
+
+    // Falling mechanics
+    private fallTimer: number = 0;
+    private fallSpeed: number = GameConfig.SPEEDS.LOW;  // TODO: Should this be a function of level and speed?
     
     /**
      * Called once when the scene is first initialized
@@ -37,6 +45,11 @@ export class GameScene extends Scene {
 
         this.createPlayingField(engine);    // Draw the playing field background        
         this.createBottleNeck(engine);      // Draw the bottle neck indicator
+        this.createSpeedDisplay(engine);    // Draw the speed display
+
+        // Set up keyboard input handlers
+        engine.input.keyboard.on('press', (evt: KeyEvent) => this.handleKeyPress(evt));
+        engine.input.keyboard.on('release', (evt: KeyEvent) => this.handleKeyRelease(evt));
     }
 
     /**
@@ -45,13 +58,17 @@ export class GameScene extends Scene {
      */
     public onActivate(context: any): void {
         // Get the level and speed from the main menu
-        if (context.data) {
+        if (context?.sceneActivationData) {
             this.level = context.data.level || 0;
             this.speed = context.data.speed || 'LOW';
         }
 
         // Reset score
         // this.score = 0;
+
+        // Set fall speed based on selected speed
+        this.fallSpeed = GameConfig.SPEEDS[this.speed];
+        this.fallTimer = 0;
 
         // Initialize the game with selected settings
         console.log(`Game started! Level: ${this.level}, Speed: ${this.speed}`);
@@ -60,6 +77,237 @@ export class GameScene extends Scene {
         this.clearField();  // Clear any existing pathogens
         this.generatePathogens();   // Generate random pathogens for this level
         this.spawnNewCapsule(); // Spawn the first capsule
+    }
+
+    /**
+     * Called every frame before update
+     * @param engine The game engine instance
+     * @param delta Time elapsed since last frame in milliseconds
+     */
+    public onPreUpdate(_engine: Engine, delta: number): void {
+        // Handle held keys for continuous movement
+        this.handleHeldKeys(delta);
+
+        // Handle automatic falling
+        this.handleAutomaticFalling(delta);
+    }
+
+    /**
+     * Makes the current capsule fall automatically based on speed setting
+     */
+    private handleAutomaticFalling(delta: number): void {
+        if (!this.currentCapsule || !this.currentCapsule.isFalling) return;
+
+        // Update fall timer
+        this.fallTimer += delta;
+
+        // Check if it's time to fall
+        if (this.fallTimer >= this.fallSpeed) {
+            this.fallTimer = 0;     // Reset timer
+            this.moveCapsuleDown(); // Try to move down
+        }
+    }
+    
+
+    /**
+     * Handles initial key press
+     * @param evt Keyboard event
+     */
+    private handleKeyPress(evt: KeyEvent): void {
+        if (!this.currentCapsule || !this.currentCapsule.isFalling) return;
+
+        switch (evt.key) {
+            case Keys.Left:
+            case Keys.ArrowLeft:
+                this.moveCapsuleLeft();
+                this.keyHeldTime.set(evt.key, 0);
+                this.keyRepeatTime.set(evt.key, 0);
+                break;
+            
+            case Keys.Right:
+            case Keys.ArrowRight:
+                this.moveCapsuleRight();
+                this.keyHeldTime.set(evt.key, 0);
+                this.keyRepeatTime.set(evt.key, 0);
+                break;
+            
+            case Keys.Down:
+            case Keys.ArrowDown:
+                this.moveCapsuleDown();
+                this.keyHeldTime.set(evt.key, 0);
+                this.keyRepeatTime.set(evt.key, 0);
+                break;
+            
+            case Keys.Up:
+            case Keys.ArrowUp:
+            case Keys.Space:
+                this.rotateCapsule();
+                break;
+        }
+    }
+
+    /**
+     * Handles key release
+     * @param evt Keyboard event
+     */
+    private handleKeyRelease(evt: KeyEvent): void {
+        this.keyHeldTime.delete(evt.key);
+        this.keyRepeatTime.delete(evt.key);
+    }
+
+    /**
+     * Handles continuous movement for held keys
+     * @param delta Time since last frame
+     */
+    private handleHeldKeys(delta: number): void {
+        if (!this.currentCapsule || !this.currentCapsule.isFalling) return;
+
+        // Check each held key
+        for (const [key, heldTime] of this.keyHeldTime) {
+            // Update held time
+            this.keyHeldTime.set(key, heldTime + delta);
+
+            const newHeldTime = this.keyHeldTime.get(key) || 0;
+            const repeatTime = this.keyRepeatTime.get(key) || 0;
+
+            // Check if we should repeat the action
+            if (newHeldTime >= GameConfig.INPUT_REPEAT_DELAY) {
+                if (repeatTime >= GameConfig.INPUT_REPEAT_RATE) {
+                    // Reset repeat timer and perform action
+                    this.keyRepeatTime.set(key, 0);
+
+                    switch (key) {
+                        case Keys.Left:
+                        case Keys.ArrowLeft:
+                            this.moveCapsuleLeft();
+                            break;
+                        
+                        case Keys.Right:
+                        case Keys.ArrowRight:
+                            this.moveCapsuleRight();
+                            break;
+                        
+                        case Keys.Down:
+                        case Keys.ArrowDown:
+                            this.moveCapsuleDown(true); // Pass true for soft drop
+                            break;
+                    }
+                } else {
+                    // Update repeat timer
+                    this.keyRepeatTime.set(key, repeatTime + delta);
+                }
+            }
+            
+        }
+    }
+
+    /**
+     * Moves the current capsule left if possible
+     */
+    private moveCapsuleLeft(): void {
+        if (!this.currentCapsule) return;
+
+        if (this.currentCapsule.moveLeft()) {
+            // Update visual positions
+            this.updateCapsuleVisualPosition();
+        }
+    }
+
+    /**
+     * Moves the current capsule right if possible
+     */
+    private moveCapsuleRight(): void {
+        if (!this.currentCapsule) return;
+
+        if (this.currentCapsule.moveRight()) {
+            // Update visual positions
+            this.updateCapsuleVisualPosition();
+        }
+    }
+
+    /**
+     * Moves the current capsule down if possible
+     * @param isSoftDrop Whether this is a soft drop (player holding down)
+     */
+    private moveCapsuleDown(isSoftDrop: boolean = false): void {
+        if (!this.currentCapsule) return;
+
+        if (this.currentCapsule.moveDown()) {
+            // Update visual positions
+            this.updateCapsuleVisualPosition();
+
+            // If this is a soft drop, reset the fall timer
+            // This prevents the capsule from getting an extra automatic drop
+            if (isSoftDrop) {
+                this.fallTimer = 0;
+            }
+        } else {
+            // Can't move down - capsule has landed
+            this.landCapsule();
+        }
+    }
+
+    /**
+     * Rotates the current capsule if possible
+     */
+    private rotateCapsule(): void {
+        if (!this.currentCapsule) return;
+
+        if (this.currentCapsule.rotate()) {
+            // Update visual positions
+            this.updateCapsuleVisualPosition();
+        }
+    }
+
+    /**
+     * Updates the visual position of the capsule halves
+     */
+    private updateCapsuleVisualPosition(): void {
+        if (!this.currentCapsule) return;
+
+        this.currentCapsule.half1.pos = this.gridToScreen(
+            this.currentCapsule.half1.gridCol,
+            this.currentCapsule.half1.gridRow            
+        );
+        this.currentCapsule.half2.pos = this.gridToScreen(
+            this.currentCapsule.half2.gridCol,
+            this.currentCapsule.half2.gridRow
+        );
+    }
+
+    /**
+     * Handles when a capsule lands and can't fall anymore
+     */
+    private landCapsule(): void {
+        if (!this.currentCapsule) return;
+
+        console.log('Capsule landed!');
+
+        // Mark as not falling
+        this.currentCapsule.isFalling = false;
+
+        // Add both halves to the grid
+        this.grid.set(
+            this.currentCapsule.half1.gridCol,
+            this.currentCapsule.half1.gridRow,
+            this.currentCapsule.half1
+        );
+        this.grid.set(
+            this.currentCapsule.half2.gridCol,
+            this.currentCapsule.half2.gridRow,
+            this.currentCapsule.half2
+        );
+
+        // TODO: Check for matches
+        // TODO: Apply gravity
+
+        // Clear current capsule reference
+        this.currentCapsule = null;
+
+        // TODO: Check for game over
+
+        // Spawn a new capsule
+        this.spawnNewCapsule();
     }
 
     /**
@@ -154,6 +402,48 @@ export class GameScene extends Scene {
             color: borderColor
         }));
         this.add(rightBorder);
+    }
+
+    /**
+     * Creates a display showing the current game speed
+     * @param engine The game engine instance
+     */
+    private createSpeedDisplay(engine: Engine): void {
+        // Create speed label
+        const speedLabel = new Text({
+            text: `Speed: ${this.speed}`,
+            font: new Font({
+                size: 16,
+                color: Color.fromHex(GameConfig.COLORS.PEAR),
+                family: 'Arial'
+            })
+        });
+
+        // Position it in the top right corner
+        const speedActor = new Actor({
+            pos: vec(engine.drawWidth - 60, 30),
+            name: 'speed-display'
+        });
+        speedActor.graphics.use(speedLabel);
+        this.add(speedActor);
+
+        // Create level label
+        const levelLabel = new Text({
+            text: `Level: ${this.level}`,
+            font: new Font({
+                size: 16,
+                color: Color.fromHex(GameConfig.COLORS.SKY_BLUE),
+                family: 'Arial'
+            })
+        });
+
+        // Position it below speed
+        const levelActor = new Actor({
+            pos: vec(engine.drawWidth - 60, 50),
+            name: 'level-display'
+        })
+        levelActor.graphics.use(levelLabel);
+        this.add(levelActor);
     }
 
     /**

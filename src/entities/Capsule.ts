@@ -1,5 +1,5 @@
 // src/entities/Capsules.ts
-import { Actor, vec, Rectangle, Color } from 'excalibur';
+import { Actor, Rectangle, Color } from 'excalibur';
 import { Resources } from '../resources/Resources';
 import { GameConfig } from '../config/GameConfig';
 
