@@ -2,6 +2,7 @@
 
 import { Scene, Engine, Color, Text, Font, vec, Actor, Rectangle } from 'excalibur';
 import { GameConfig } from '../config/GameConfig';
+import { Resources} from '../resources/Resources';
 
 /**
  * The main menu where players select level and speed before starting
@@ -106,18 +107,18 @@ export class MainMenuScene extends Scene {
         this.add(levelValueActor);
 
         // Left arrow button
-        this.createButton(
+        this.createSpriteButton(
             engine,
-            '<',
+            'left',
             engine.halfDrawWidth - 120,
             200,
             () => this.changeLevel(-1)
         );
 
         // Right arrow button
-        this.createButton(
+        this.createSpriteButton(
             engine,
-            '>',
+            'right',
             engine.halfDrawWidth + 80,
             200,
             () => this.changeLevel(1)
@@ -163,17 +164,17 @@ export class MainMenuScene extends Scene {
         this.add(speedValueActor);
 
         // Speed buttons
-        this.createButton(
+        this.createSpriteButton(
             engine,
-            '<',
+            'left',
             engine.halfDrawWidth - 120,
             260,
             () => this.changeSpeed(-1)
         );
 
-        this.createButton(
+        this.createSpriteButton(
             engine,
-            '>',
+            'right',
             engine.halfDrawWidth + 120,
             260,
             () => this.changeSpeed(1)
@@ -181,52 +182,39 @@ export class MainMenuScene extends Scene {
     }
 
     /**
-     * Creates the start button
+     * Creates the start button using three sprites to form a larger button
      * @param engine The game engine instance
      */
     private createStartButton(engine: Engine): void {
-        // Create a Larger button for starting the game
-        const buttonBg = new Rectangle({
-            width: 120,
-            height: 40,
-            color: Color.fromHex(GameConfig.COLORS.HOT_PINK)
-        });
+        const buttonY = 340;
+        const buttonSpacing = 32;   // Since each sprite is 32x32, no gap between them
 
-        const startButton = new Actor({
-            pos: vec(engine.halfDrawWidth, 340),
-            width: 120,
-            height: 40
-        });
-        startButton.graphics.use(buttonBg);
+        // Left part of start button
+        this.createSpriteButton(
+            engine,
+            'start-left',
+            engine.halfDrawWidth - buttonSpacing,
+            buttonY,
+            () => this.startGame(engine)
+        );
 
-        // Enable pointer events
-        startButton.pointer.useGraphicsBounds = true;
-        startButton.pointer.useColliderShape = true;
+        // Middle part of start button
+        this.createSpriteButton(
+            engine,
+            'start-middle',
+            engine.halfDrawWidth,
+            buttonY,
+            () => this.startGame(engine)
+        );
 
-        // Make it clickable
-        startButton.on('pointerup', () => {
-            this.startGame(engine);
-        });
-
-        this.add(startButton);
-
-        // Add text to the button (as a separate actor on top)
-        const buttonText = new Text({
-            text: 'START',
-            font: new Font({
-                size: 24,
-                color: Color.White,
-                family: 'Arial',
-                bold: true
-            })
-        });
-
-        const textActor = new Actor({
-            pos: vec(engine.halfDrawWidth, 340),
-            z: 1    // Ensure text is on top
-        });
-        textActor.graphics.use(buttonText);
-        this.add(textActor);
+        // Right part of start button
+        this.createSpriteButton(
+            engine,
+            'start-right',
+            engine.halfDrawWidth + buttonSpacing,
+            buttonY,
+            () => this.startGame(engine)
+        );
     }
 
     /**
@@ -259,54 +247,80 @@ export class MainMenuScene extends Scene {
     }
 
     /**
-     * Helper method to create clickable buttons
+     * Helper method to create clickable sprite buttons
      * @param engine The game engine instance
-     * @param text Button text
+     * @param buttonType Type of button sprite to use
      * @param x x position
      * @param y y position
      * @param onClick Click handler function
      */
-    private createButton(_engine: Engine, text: string, x: number, y: number, onClick: () => void): void {
-        // Button background
-        const buttonBg = new Rectangle({
-            width: 30,
-            height: 30,
-            color: Color.fromHex(GameConfig.COLORS.SKY_BLUE)
-        });
-
+    private createSpriteButton(
+        _engine: Engine,
+        buttonType: 'left' | 'right' | 'start-left' | 'start-middle' | 'start-right',
+        x: number,
+        y: number,
+        onClick: () => void
+    ): void {
+        // Get the sprite for this button type
+        const sprite = Resources.getButtonSprite(buttonType);
+        
         const button = new Actor({
             pos: vec(x, y),
-            width: 30,
-            height: 30
+            width: 32,
+            height: 32,
+            name: `sprite-button-${buttonType}-${x}-${y}`   // Add unique names for debugging
         });
-        button.graphics.use(buttonBg);
+
+        // Use the sprite if available, otherwise fall back to colored rectangles
+        if (sprite) {
+            button.graphics.use(sprite);
+        } else {
+            console.warn(`Could not load sprite for button type: ${buttonType}, using fallback`);
+            // Fallback to colored rectangle
+            const fallbackColor = buttonType.startsWith('start')
+                ? Color.fromHex(GameConfig.COLORS.HOT_PINK)
+                : Color.fromHex(GameConfig.COLORS.SKY_BLUE);
+            
+            const buttonBg = new Rectangle({
+                width: 32,
+                height: 32,
+                color: fallbackColor
+            });
+            button.graphics.use(buttonBg);
+
+            // Add text for fallback buttons
+            const fallbackText = buttonType === 'left' ? '<' :
+                                buttonType === 'right' ? '>' :
+                                'S';    // For start button parts
+            
+            const buttonText = new Text({
+                text: fallbackText,
+                font: new Font({
+                    size: 16,
+                    color: Color.White,
+                    family: 'Arial',
+                    bold: true
+                })
+            });
+
+            const textActor = new Actor({
+                pos: vec(x, y),
+                z: 1
+            });
+            textActor.graphics.use(buttonText);
+            this.add(textActor);
+        }
 
         // Enable pointer events
         button.pointer.useGraphicsBounds = true;
 
         // Make it clickable
-        button.on('pointerup', onClick);
+        button.on('pointerup', () => {
+            console.log(`Sprite button ${buttonType} clicked!`);    // Debug log
+            onClick();
+        });
 
         this.add(button);
-
-        // Button text (add after button so it's on top)
-        const buttonText = new Text({
-            text: text,
-            font: new Font({
-                size: 20,
-                color: Color.White,
-                family: 'Arial',
-                bold: true
-            })
-        });
-
-        const textActor = new Actor({
-            pos: vec(x, y),
-            z: 1    // Ensure text is on top
-        });
-        textActor.graphics.use(buttonText);
-        
-        this.add(textActor);
     }
 
     /**

@@ -9,13 +9,16 @@ import { ImageSource, Loader, SpriteSheet } from 'excalibur';
 export class Resources {
     // Image sources - these load the actual image files
     public static readonly SpriteSheetImage = new ImageSource('./images/sprites/png/sprite_sheet.png');
+    public static readonly ButtonSpritesImage = new ImageSource('./images/sprites/png/buttons.png');
 
-    // Sprite sheet - this will be initialized after the image loads
+    // Sprite sheet - these will be initialized after the image loads
     public static SpriteSheet: SpriteSheet;
+    public static ButtonSpriteSheet: SpriteSheet;
 
     // Resource loader - Excalibur's built-in loading screen
     public static readonly ResourceLoader = new Loader([
-        Resources.SpriteSheetImage
+        Resources.SpriteSheetImage,
+        Resources.ButtonSpritesImage
         // We'll add more resources here later (sounds, music, etc.)
     ]);
 
@@ -41,6 +44,25 @@ export class Resources {
         });
 
         console.log('Sprite sheet initialized with', Resources.SpriteSheet.sprites.length, 'sprites');
+
+        // Check if the button sprites image is loaded
+        if (!Resources.ButtonSpritesImage.isLoaded()) {
+            console.log('Button sprites image not loaded!');
+            return;
+        }
+
+        // Create the button sprite sheet with 32x32 sprites in a 1x5 grid (one row, five columns)
+        Resources.ButtonSpriteSheet = SpriteSheet.fromImageSource({
+            image: Resources.ButtonSpritesImage,
+            grid: {
+                rows: 1,
+                columns: 5,
+                spriteWidth: 32,
+                spriteHeight: 32
+            }
+        });
+
+        console.log('Button sprite sheet initialized with', Resources.ButtonSpriteSheet.sprites.length, 'sprites');
     }
 
     /**
@@ -90,5 +112,41 @@ export class Resources {
 
         // Convert row,col to sprite index
         return row * 4 + col;
+    }
+
+    /**
+     * Gets a button sprite from the button sprite sheet
+     * @param buttonType Type of button: 'left', 'right', 'start-left', 'start-middle', 'start-right'
+     * @returns Sprite from the button sprite sheet, or null if not found
+     */
+    public static getButtonSprite(buttonType: 'left' | 'right' | 'start-left' | 'start-middle' | 'start-right') {
+        if (!Resources.ButtonSpriteSheet) {
+            console.warn('Button sprite sheet not initialized!');
+            return null;
+        }
+
+        let spriteIndex: number;
+        switch (buttonType) {
+            case 'left':
+                spriteIndex = 0;
+                break;
+            case 'right':
+                spriteIndex = 1;
+                break;
+            case 'start-left':
+                spriteIndex = 2;
+                break;
+            case 'start-middle':
+                spriteIndex = 3;
+                break;
+            case 'start-right':
+                spriteIndex = 4;
+                break;
+            default:
+                console.warn(`Unknown button type: ${buttonType}`);
+                return null;
+        }
+
+        return Resources.ButtonSpriteSheet.sprites[spriteIndex];
     }
 }
