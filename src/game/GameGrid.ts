@@ -30,6 +30,8 @@ export class GameGrid {
                 this.grid[col][row] = null;
             }
         }
+        console.log('GameGrid: Grid initialized');
+        console.table(this.grid);
     }
 
     /**
@@ -41,6 +43,8 @@ export class GameGrid {
                 this.grid[col][row] = null;
             }
         }
+        console.log('GameGrid: clear - Grid cleared');
+        console.table(this.grid);
     }
 
     /**
@@ -55,6 +59,8 @@ export class GameGrid {
             row < 0 || row >= GameConfig.FIELD_HEIGHT) {
             return null;
         }
+        console.log('GameGrid: get - Getting cell contents');
+        console.table(this.grid);
 
         return this.grid[col][row];
     }
@@ -80,6 +86,9 @@ export class GameGrid {
             content.updateGridPosition(col, row);
         }
 
+        console.log(`GameGrid: set - cell (${col}, ${row}) updated with ${content}`);
+        // console.table(this.grid);
+
         return true;
     }
 
@@ -92,6 +101,10 @@ export class GameGrid {
     public remove(col: number, row: number): GridCell {
         const content = this.get(col, row);
         this.set(col, row, null);
+
+        console.log(`GameGrid: remove - cell (${col}, ${row}) set to null`);
+        // console.table(this.grid);
+
         return content;
     }
 
@@ -102,7 +115,9 @@ export class GameGrid {
      * @returns True if cell has content, false if empty or out of bounds
      */
     public isOccupied(col: number, row: number): boolean {
-        return this.get(col, row) !== null;
+        const occupied = this.get(col, row) !== null;
+        console.log(`GameGrid.isOccupied(${col}, ${row}) = ${occupied}`);
+        return occupied;
     }
 
     /**
@@ -112,7 +127,9 @@ export class GameGrid {
      * @returns True if cell is empty or out of bounds, false if occupied
      */
     public isEmpty(col: number, row: number): boolean {
-        return this.get(col, row) === null;
+        const empty = this.get(col, row) === null;
+        console.log(`GameGrid.isEmpty(${col}, ${row}) = ${empty}`);
+        return empty;
     }
 
     /**

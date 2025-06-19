@@ -4,7 +4,7 @@ import { Scene, Engine, Color, Actor, Rectangle, vec, Vector, Keys, KeyEvent, Te
 import { GameConfig } from '../config/GameConfig';
 import { GameGrid } from '../game/GameGrid';
 import { Pathogen } from '../entities/Pathogen';
-import { Capsule } from '../entities/Capsule';
+import { Capsule, CapsuleHalf } from '../entities/Capsule';
 
 /**
  * The main gameplay scene
@@ -34,6 +34,9 @@ export class GameScene extends Scene {
     private fallTimer: number = 0;
     private fallSpeed: number = GameConfig.SPEEDS.LOW;  // TODO: Should this be a function of level and speed?
     
+    // Game state flag
+    private isGameOver: boolean = false;
+
     /**
      * Called once when the scene is first initialized
      * @param engine The game engine instance
@@ -45,8 +48,7 @@ export class GameScene extends Scene {
 
         this.createPlayingField(engine);    // Draw the playing field background        
         this.createBottleNeck(engine);      // Draw the bottle neck indicator
-        this.createSpeedDisplay(engine);    // Draw the speed display
-
+        
         // Set up keyboard input handlers
         engine.input.keyboard.on('press', (evt: KeyEvent) => this.handleKeyPress(evt));
         engine.input.keyboard.on('release', (evt: KeyEvent) => this.handleKeyRelease(evt));
@@ -57,6 +59,15 @@ export class GameScene extends Scene {
      * @param context Scene activation context with data from previous scene
      */
     public onActivate(context: any): void {
+        console.log('GameScene activating...', context);
+
+        // Reset game state
+        this.isGameOver = false;
+        this.currentCapsule = null;
+        this.keyHeldTime.clear();
+        this.keyRepeatTime.clear();
+        this.fallTimer = 0;
+
         // Get the level and speed from the main menu
         if (context?.sceneActivationData) {
             this.level = context.data.level || 0;
@@ -68,7 +79,12 @@ export class GameScene extends Scene {
 
         // Set fall speed based on selected speed
         this.fallSpeed = GameConfig.SPEEDS[this.speed];
-        this.fallTimer = 0;
+        
+        // Clean up any existing game objects first
+        this.cleanupGameObjects();
+
+        // Create fresh UI elements
+        this.createSpeedDisplay(this.engine);    // Draw the speed display
 
         // Initialize the game with selected settings
         console.log(`Game started! Level: ${this.level}, Speed: ${this.speed}`);
@@ -80,11 +96,60 @@ export class GameScene extends Scene {
     }
 
     /**
+     * Called when the scene is deactivated (when leaving this scene)
+     */
+    public onDeactivate(): void {
+        console.log('GameScene deactivating...');
+        this.cleanupGameObjects();
+    }
+
+    /**
+     * Removes all game-related actors from the scene
+     */
+    private cleanupGameObjects(): void {
+        console.log('Cleaning up game objects...');
+
+        // Get all actors that are game objects (not UI elements)
+        const actorsToRemove = this.actors.filter(actor => {
+            const name = actor.name;
+            return (
+                actor instanceof Pathogen ||
+                actor instanceof CapsuleHalf ||
+                actor instanceof Capsule ||
+                name.includes('pathogen') ||
+                name.includes('capsule') ||
+                name === 'speed-display' ||
+                name === 'level-display'
+            );
+        });
+
+        console.log(`Removing ${actorsToRemove.length} game objects`);
+
+        // Remove each actor
+        actorsToRemove.forEach(actor => {
+            this.remove(actor);
+            this.currentCapsule = null;
+        });
+
+        // Clear the current capsule reference
+        if (this.currentCapsule) {
+            this.currentCapsule.kill();
+            this.currentCapsule = null;
+        }
+
+        // Clear the grid
+        this.grid.clear();
+    }
+
+    /**
      * Called every frame before update
      * @param engine The game engine instance
      * @param delta Time elapsed since last frame in milliseconds
      */
     public onPreUpdate(_engine: Engine, delta: number): void {
+        // Don't process input if game is over
+        if (this.isGameOver) return;
+        
         // Handle held keys for continuous movement
         this.handleHeldKeys(delta);
 
@@ -96,7 +161,7 @@ export class GameScene extends Scene {
      * Makes the current capsule fall automatically based on speed setting
      */
     private handleAutomaticFalling(delta: number): void {
-        if (!this.currentCapsule || !this.currentCapsule.isFalling) return;
+        if (!this.currentCapsule || !this.currentCapsule.isFalling || this.isGameOver) return;
 
         // Update fall timer
         this.fallTimer += delta;
@@ -114,7 +179,7 @@ export class GameScene extends Scene {
      * @param evt Keyboard event
      */
     private handleKeyPress(evt: KeyEvent): void {
-        if (!this.currentCapsule || !this.currentCapsule.isFalling) return;
+        if (!this.currentCapsule || !this.currentCapsule.isFalling || this.isGameOver) return;
 
         switch (evt.key) {
             case Keys.Left:
@@ -160,7 +225,7 @@ export class GameScene extends Scene {
      * @param delta Time since last frame
      */
     private handleHeldKeys(delta: number): void {
-        if (!this.currentCapsule || !this.currentCapsule.isFalling) return;
+        if (!this.currentCapsule || !this.currentCapsule.isFalling || this.isGameOver) return;
 
         // Check each held key
         for (const [key, heldTime] of this.keyHeldTime) {
@@ -205,9 +270,9 @@ export class GameScene extends Scene {
      * Moves the current capsule left if possible
      */
     private moveCapsuleLeft(): void {
-        if (!this.currentCapsule) return;
+        if (!this.currentCapsule || this.isGameOver) return;
 
-        if (this.currentCapsule.moveLeft()) {
+        if (this.currentCapsule.moveLeft(this.grid)) {
             // Update visual positions
             this.updateCapsuleVisualPosition();
         }
@@ -217,9 +282,9 @@ export class GameScene extends Scene {
      * Moves the current capsule right if possible
      */
     private moveCapsuleRight(): void {
-        if (!this.currentCapsule) return;
+        if (!this.currentCapsule || this.isGameOver) return;
 
-        if (this.currentCapsule.moveRight()) {
+        if (this.currentCapsule.moveRight(this.grid)) {
             // Update visual positions
             this.updateCapsuleVisualPosition();
         }
@@ -230,9 +295,9 @@ export class GameScene extends Scene {
      * @param isSoftDrop Whether this is a soft drop (player holding down)
      */
     private moveCapsuleDown(isSoftDrop: boolean = false): void {
-        if (!this.currentCapsule) return;
+        if (!this.currentCapsule || this.isGameOver) return;
 
-        if (this.currentCapsule.moveDown()) {
+        if (this.currentCapsule.moveDown(this.grid)) {
             // Update visual positions
             this.updateCapsuleVisualPosition();
 
@@ -251,9 +316,9 @@ export class GameScene extends Scene {
      * Rotates the current capsule if possible
      */
     private rotateCapsule(): void {
-        if (!this.currentCapsule) return;
+        if (!this.currentCapsule || this.isGameOver) return;
 
-        if (this.currentCapsule.rotate()) {
+        if (this.currentCapsule.rotate(this.grid)) {
             // Update visual positions
             this.updateCapsuleVisualPosition();
         }
@@ -279,7 +344,7 @@ export class GameScene extends Scene {
      * Handles when a capsule lands and can't fall anymore
      */
     private landCapsule(): void {
-        if (!this.currentCapsule) return;
+        if (!this.currentCapsule || this.isGameOver) return;
 
         console.log('Capsule landed!');
 
@@ -329,7 +394,8 @@ export class GameScene extends Scene {
         const field = new Actor({
             pos: vec(engine.halfDrawWidth, engine.halfDrawHeight),
             width: fieldWidth,
-            height: fieldHeight
+            height: fieldHeight,
+            name: 'playing-field'
         });
         field.graphics.use(fieldBg);
         this.add(field);
@@ -619,19 +685,30 @@ export class GameScene extends Scene {
      * Spawns a new capsule at the top of the field
      */
     private spawnNewCapsule(): void {
+        // Don't spawn if game is over
+        if (this.isGameOver) return;
+        
         // Random colors for both halves
         const color1 = Math.floor(Math.random() * 3);
         const color2 = Math.floor(Math.random() * 3);        
         
         // Create new capsule
         this.currentCapsule = new Capsule(color1, color2, 'horizontal');
-
+        
         // Start at the top center of the field
         const startCol = Math.floor(GameConfig.FIELD_WIDTH / 2) - 1;
         const startRow = 0;
 
         // Set position
         this.currentCapsule.setGridPosition(startCol, startRow);
+
+        // Check if the spawn position is already occupied (game over)
+        if (this.grid.isOccupied(this.currentCapsule.half1.gridCol, this.currentCapsule.half1.gridRow) ||
+            this.grid.isOccupied(this.currentCapsule.half2.gridCol, this.currentCapsule.half2.gridRow)) {
+            console.log('GAME OVER!');
+            this.handleGameOver();
+            return;
+        }
 
         // Update visual positions
         this.currentCapsule.half1.pos = this.gridToScreen(
@@ -648,5 +725,34 @@ export class GameScene extends Scene {
 
         // Don't add to grid yet - it's falling
         console.log(`Spawned new capsule with colors ${color1} and ${color2}`);
+    }
+
+    /**
+     * Handles the game over state
+     */
+    private handleGameOver(): void {
+        // Set game over flag
+        this.isGameOver = true;
+
+        // Stop the current capsule from falling   
+        if (this.currentCapsule) {
+            this.currentCapsule.isFalling = false;
+            this.currentCapsule.kill();
+            this.currentCapsule = null;
+        }
+
+        // Clear input state
+        this.keyHeldTime.clear();
+        this.keyRepeatTime.clear();
+        
+        // TODO: Show game over screen
+        // TODO: Play game over sound
+        // For now, just log and go back to menu after a delay
+        console.log('Game Over!');
+
+        // Return to menu after 3 seconds
+        setTimeout(() => {
+            this.engine.goToScene('mainMenu');
+        }, 3000);
     }
 }

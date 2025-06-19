@@ -22,7 +22,7 @@ function createGame(): Engine {
     const game = new Engine({
         width: GameConfig.GAME_WIDTH,           // Set the game dimensions from our config
         height: GameConfig.GAME_HEIGHT,         // ...
-        displayMode: DisplayMode.FitScreen,     // To scale the game to fit the container, which maintains aspect ratio and centers the game
+        displayMode: DisplayMode.FitContainer,     // To scale the game to fit the container, which maintains aspect ratio and centers the game
         backgroundColor: Color.fromHex(GameConfig.COLORS.BACKGROUND),   // Set the background color to our dark theme
         antialiasing: false,                    // Disable anti-aliasing for crisp pixel art
         canvasElement: canvas,                  // Attach the game canvas to our HTML container

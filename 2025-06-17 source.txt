@@ -1,0 +1,2091 @@
+// src/config/GameConfig.ts
+
+/**
+ * @class GameConfig
+ * @description Central configuration for Dr. Rodger game constants and settings
+ */
+export class GameConfig {
+    // Game dimensions - based on classic Dr. Mario proportions
+    // The playing field is taller than it is wide, like a medicine bottle
+    public static readonly GAME_WIDTH = 480;    // Width in pixels
+    public static readonly GAME_HEIGHT = 640;   // Height in pixels
+
+    // Playing field dimensions in tiles
+    // Classic Dr. Mario uses an 8x16 grid (width x height)
+    public static readonly FIELD_WIDTH = 8;     // Number of columns
+    public static readonly FIELD_HEIGHT = 16;   // Number of rows
+
+    // Size of each tile/block in pixels
+    // This determines how big each pathogen and capsule piece appears
+    public static readonly TILE_SIZE = 32;
+
+    // The "neck" of the bottle starts at row 3 (0-indexed)
+    // If capsules reach this height, it's game over
+    public static readonly BOTTLE_NECK_ROW = 3;
+
+    // Pathogen colors - using the specified color palette
+    public static readonly COLORS = {
+        HOT_PINK: '#FF00AA',
+        SKY_BLUE: '#24E0FF',
+        PEAR: '#E2E603',
+        BACKGROUND: '#1a1a2e',
+        BORDER: '#FF00AA'
+    }
+
+    // Color indices for easier array access
+    public static readonly COLOR_INDEX = {
+        PINK: 0,
+        BLUE: 1,
+        YELLOW: 2
+    }
+
+    // Array of color values for easy iteration
+    public static readonly COLOR_VALUES = [
+        GameConfig.COLORS.HOT_PINK,
+        GameConfig.COLORS.SKY_BLUE,
+        GameConfig.COLORS.PEAR
+    ];
+
+    // Game speed settings (milliseconds between drops)
+    // These determine how fast capsules fall
+    public static readonly SPEEDS = {
+        LOW: 1000,      // 1 second between drops
+        MEDIUM: 500,    // 0.5 seconds between drops
+        HIGH: 250       // 0.25 seconds between drops
+    };
+
+    // Scoring system
+    public static readonly SCORING = {
+        SINGLE_PATHOGEN: 100,   // Points for clearing one pathogen
+        COMBO_MULTIPLIER: 2,    // Multiplier for clearing multiple at once
+        SPEED_BONUS: {
+            LOW: 1,         // No bonus for low speed
+            MEDIUM: 1.5,    // 50% bonus for medium speed
+            HIGH: 2         // 100% bonus for high speed
+        }
+    };
+
+    // Level configuration
+    public static readonly MIN_LEVEL = 0;
+    public static readonly MAX_LEVEL = 20;
+
+    // Number of pathogens per level
+    // Formula: 4 + (Level * 2) pathogens
+    // So level 0 = 4 pathogens, level 20 = 44 pathogens
+    public static readonly PATHOGENS_PER_LEVEL = (level: number): number => {
+        return 4 + (level * 2);
+    }
+
+    // Input repeat delays (for holding down movement keys)
+    public static readonly INPUT_REPEAT_DELAY = 200;    // Initial delay in ms
+    public static readonly INPUT_REPEAT_RATE = 50;      // Repeat rate in ms
+}
+
+
+
+// src/entities/Capsules.ts
+import { Actor, Rectangle, Color } from 'excalibur';
+import { Resources } from '../resources/Resources';
+import { GameConfig } from '../config/GameConfig';
+import { GameGrid } from '../game/GameGrid';
+
+/**
+ * The orientation of a capsule
+ */
+export type CapsuleOrientation = 'horizontal' | 'vertical';
+
+/**
+ * Represents one half of a capsule
+ */
+export class CapsuleHalf extends Actor {
+    // Which color this half is (0=pink, 1=blue, 2=yellow)
+    public readonly colorIndex: number;
+
+    // Reference to the parent capsule
+    public parentCapsule: Capsule | null = null;
+
+    // Grid position
+    public gridCol: number = 0;
+    public gridRow: number = 0;
+
+    /**
+     * Creates a new capsule half
+     * @param colorIndex Color of this half (0=pink, 1=blue, 2=yellow)
+     */
+    constructor(colorIndex: number) {
+        super({
+            width: GameConfig.TILE_SIZE,
+            height: GameConfig.TILE_SIZE,
+            name: `capsule-half-${colorIndex}`
+        });
+
+        this.colorIndex = colorIndex;
+    }
+
+    /**
+     * Updates the sprite based on orientation and position
+     * @param orientation Horizontal or vertical
+     * @param isFirst Is this the first half (left/top) or second (right/bottom)?
+     */
+    public updateSprite(orientation: CapsuleOrientation, isFirst: boolean): void {
+        if (!Resources.SpriteSheet) {
+            // Fallback to colored rectangle
+            const fallbackColor = Color.fromHex(GameConfig.COLOR_VALUES[this.colorIndex]);
+            this.graphics.use(new Rectangle({
+                width: GameConfig.TILE_SIZE - 2,
+                height: GameConfig.TILE_SIZE - 2,
+                color: fallbackColor
+            }));
+            return;
+        }
+        
+        // Determine which sprite to use
+        let half: 'left' | 'right' | 'top' | 'bottom';
+        if (orientation === 'horizontal') {
+            half = isFirst ? 'left' : 'right';
+        } else {
+            half = isFirst ? 'top' : 'bottom';
+        }
+
+        // Get the sprite index
+        const spriteIndex = Resources.getCapsuleSprite(this.colorIndex, orientation, half);
+        const row = Math.floor(spriteIndex / 4);
+        const col = spriteIndex % 4;
+        const sprite = Resources.SpriteSheet.getSprite(col, row);
+
+        if (sprite) {
+            this.graphics.use(sprite);
+        }
+    }
+
+    /**
+     * Converts this half to a single/disconnected piece
+     */
+    public convertToSingle(): void {
+        this.parentCapsule = null;
+
+        if (!Resources.SpriteSheet) {
+            return;
+        }
+
+        // Use the half capsule sprite
+        const spriteIndex = Resources.getHalfCapsuleSprite(this.colorIndex);
+        const row = Math.floor(spriteIndex / 4);
+        const col = spriteIndex % 4;
+        const sprite = Resources.SpriteSheet.getSprite(col, row);
+
+        if (sprite) {
+            this.graphics.use(sprite);
+        }
+    }
+}
+
+/**
+ * Represents a full capsule made of two colored halves
+ */
+export class Capsule extends Actor {
+    // The two halves of the capsule
+    public readonly half1: CapsuleHalf;
+    public readonly half2: CapsuleHalf;
+
+    // Current orientation
+    public orientation: CapsuleOrientation = 'horizontal';
+
+    // Which half is "first" (determines rotation state)
+    private half1IsFirst: boolean = true;
+
+    // Grid position (of the first half)
+    public gridCol: number = 0;
+    public gridRow: number = 0;
+
+    // Is the capsule currently falling?
+    public isFalling: boolean = true;
+
+    /**
+     * Creates a new capsule with two colored halves
+     * @param color1 Color of the first half (0=pink, 1=blue, 2=yellow)
+     * @param color2 Color of the second half (0=pink, 1=blue, 2=yellow)
+     * @param orientation Initial orientation
+     */
+    constructor(color1: number, color2: number, orientation: CapsuleOrientation = 'horizontal') {
+        super({
+            name: `capsule-${color1}-${color2}`
+        });
+
+        // Create the two halves
+        this.half1 = new CapsuleHalf(color1);
+        this.half2 = new CapsuleHalf(color2);
+
+        // Set parent references
+        this.half1.parentCapsule = this;
+        this.half2.parentCapsule = this;
+
+        // Set initilal orientation
+        this.orientation = orientation;
+        this.updateHalfPositions();
+        this.updateHalfSprites();
+    }
+
+    /**
+     * Called when the capsule is added to the scene
+     */
+    public onInitialize(): void {
+        // Add both halves to the scene
+        this.scene?.add(this.half1);
+        this.scene?.add(this.half2);
+    }
+
+    /**
+     * Called before the capsule is removed
+     */
+    public onPreKill(): void {
+        // Remove both halves from the scene
+        this.half1.kill();
+        this.half2.kill();
+    }
+
+    /**
+     * Sets the grid position of the capsule
+     * @param col Column position
+     * @param row Row position
+     */
+    public setGridPosition(col: number, row: number): void {
+        this.gridCol = col;
+        this.gridRow = row;
+        this.updateHalfPositions();
+    }
+
+    /**
+     * Rotates the capsule 90 degrees clockwise
+     * @param grid The game grid to check collisions against
+     * @returns True if rotation was successful
+     */
+    public rotate(grid?: GameGrid): boolean {
+        // Check if rotation is valid
+        if (!this.canRotate(grid)) return false;
+        
+        // Perform 90-degree clockwise rotation
+        if (this.orientation === 'horizontal') {
+            // Horizontal to vertical
+            this.orientation = 'vertical';
+            // Keep the same "first" half
+        } else {
+            // Vertical to horizontal
+            this.orientation = 'horizontal';
+            this.half1IsFirst = !this.half1IsFirst;
+        }
+
+        this.updateHalfPositions();
+        this.updateHalfSprites();
+        
+        return true;
+    }
+
+    /**
+     * Updates the positions of both halves based on orientation
+     */
+    private updateHalfPositions(): void {
+        if (this.half1IsFirst) {
+            // Half1 is at the base position
+            this.half1.gridCol = this.gridCol;
+            this.half1.gridRow = this.gridRow;
+
+            if (this.orientation === 'horizontal') {
+                // Half2 is to the right
+                this.half2.gridCol = this.gridCol + 1;
+                this.half2.gridRow = this.gridRow;
+            } else {
+                // Half2 is below
+                this.half2.gridCol = this.gridCol;
+                this.half2.gridRow = this.gridRow + 1;
+            }
+        } else {
+            // Half2 is at the base position
+            this.half2.gridCol = this.gridCol;
+            this.half2.gridRow = this.gridRow;
+
+            if (this.orientation === 'horizontal') {
+                // Half1 is to the right
+                this.half1.gridCol = this.gridCol + 1;
+                this.half1.gridRow = this.gridRow;
+            } else {
+                // Half1 is below
+                this.half1.gridCol = this.gridCol;
+                this.half1.gridRow = this.gridRow + 1;
+            }
+        }
+    }
+
+    /**
+     * Updates the sprites of both halves
+     */
+    private updateHalfSprites(): void {
+        if (this.half1IsFirst) {
+            this.half1.updateSprite(this.orientation, true);
+            this.half2.updateSprite(this.orientation, false);
+        } else {
+            this.half1.updateSprite(this.orientation, false);
+            this.half2.updateSprite(this.orientation, true);
+        }
+    }
+
+    /**
+     * Checks if the capsule can move left
+     * @param grid The game grid to check collisions against
+     * @returns True if move is valid
+     */
+    public canMoveLeft(grid?: GameGrid): boolean {
+        // Check boundaries
+        if (this.gridCol <= 0) return false;
+
+        // Check for collisions with other objects
+        if (grid) {
+            // For horizontal capsules, we need to check the leftmost position
+            // For vertical capsules, both halves are in the same column
+            if (this.orientation === 'horizontal') {
+                // Only need to check the left half's new position
+                if (grid.isOccupied(this.gridCol - 1, this.gridRow)) {
+                    console.log(`Capsule: canMoveLeft (horizontal): grid.isOccupied(${this.gridCol - 1}, ${this.gridRow}) = ${grid.isOccupied(this.gridCol - 1, this.gridRow)}`);
+                    return false;
+                }
+            } else {
+                // Vertical - check both halves at the new column
+                if (grid.isOccupied(this.gridCol - 1, this.gridRow) ||
+                    grid.isOccupied(this.gridCol - 1, this.gridRow + 1)) {
+                    console.log(`Capsule: canMoveLeft (vertical 1/2): grid.isOccupied(${this.gridCol - 1}, ${this.gridRow}) = ${grid.isOccupied(this.gridCol - 1, this.gridRow)}`);
+                    console.log(`Capsule: canMoveLeft (vertical 2/2): grid.isOccupied(${this.gridCol - 1}, ${this.gridRow + 1}) = ${grid.isOccupied(this.gridCol - 1, this.gridRow + 1)}`);
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Checks if the capsule can move right
+     * @param grid The game grid to check collisions against
+     * @returns True if move is valid
+     */
+    public canMoveRight(grid?: GameGrid): boolean {
+        // Check boundaries
+        if (this.orientation === 'horizontal') {
+            if (this.gridCol + 1 >= GameConfig.FIELD_WIDTH - 1) return false;
+        } else {
+            if (this.gridCol >= GameConfig.FIELD_WIDTH - 1) return false;
+        }
+
+        // Check for collisions with other objects
+        if (grid) {
+            if (this.orientation === 'horizontal') {
+                // Only need to check the right half's new position
+                if (grid.isOccupied(this.gridCol + 2, this.gridRow)) {
+                    console.log(`Capsule: canMoveRight (horizontal): grid.isOccupied(${this.gridCol - 2}, ${this.gridRow}) = ${grid.isOccupied(this.gridCol - 2, this.gridRow)}`);
+                    return false;
+                }
+            } else {
+                // Vertical - check both halves at the new column
+                if (grid.isOccupied(this.gridCol + 1, this.gridRow) ||
+                    grid.isOccupied(this.gridCol + 1, this.gridRow + 1)) {
+                    console.log(`Capsule: canMoveRight (vertical 1/2): grid.isOccupied(${this.gridCol + 1}, ${this.gridRow}) = ${grid.isOccupied(this.gridCol + 1, this.gridRow)}`);
+                    console.log(`Capsule: canMoveRight (vertical 2/2): grid.isOccupied(${this.gridCol + 1}, ${this.gridRow + 1}) = ${grid.isOccupied(this.gridCol + 1, this.gridRow + 1)}`);
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Checks if the capsule can move down
+     * @param grid The game grid to check collisions against
+     * @returns True if move is valid
+     */
+    public canMoveDown(grid?: GameGrid): boolean {
+        // Check boundaries
+        if (this.orientation === 'horizontal') {
+            if (this.gridRow + 1 >= GameConfig.FIELD_HEIGHT) return false;
+        } else {
+            if (this.gridRow + 2 >= GameConfig.FIELD_HEIGHT) return false;
+        }
+
+        // Check for collisions with other objects
+        if (grid) {
+            if (this.orientation === 'horizontal') {
+                // Check both halves at the new row
+                if (grid.isOccupied(this.gridCol, this.gridRow + 1) ||
+                    grid.isOccupied(this.gridCol + 1, this.gridRow + 1)) {
+                    console.log(`Capsule: canMoveDown (horizontal 1/2): grid.isOccupied(${this.gridCol}, ${this.gridRow + 1}) = ${grid.isOccupied(this.gridCol, this.gridRow + 1)}`);
+                    console.log(`Capsule: canMoveDown (horizontal 2/2): grid.isOccupied(${this.gridCol + 1}, ${this.gridRow + 1}) = ${grid.isOccupied(this.gridCol + 1, this.gridRow + 1)}`);
+                    return false;
+                }
+            } else {
+                // Vertical - only need to check the bottom half's new position
+                if (grid.isOccupied(this.gridCol, this.gridRow + 2)) {
+                    console.log(`Capsule: canMoveDown (vertical): grid.isOccupied(${this.gridCol}, ${this.gridRow + 2}) = ${grid.isOccupied(this.gridCol, this.gridRow + 2)}`);
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Checks if the capsule can rotate
+     * @param grid The game grid to check collisions against
+     * @returns True if rotation is valid
+     */
+    public canRotate(grid?: GameGrid): boolean {
+        // Calculate new position after rotation
+        let newCol2 = this.gridCol;
+        let newRow2 = this.gridRow;
+
+        if (this.orientation === 'horizontal') {
+            // Currently horizontal, would become vertical
+            newRow2 = this.gridRow + 1;
+
+            // Check if it would go out of bounds
+            if (newRow2 >= GameConfig.FIELD_HEIGHT) return false;
+        } else {
+            // Current vertical, would become horizontal
+            newCol2 = this.gridCol + 1;
+
+            // Check if it would go out of bounds
+            if (newCol2 >= GameConfig.FIELD_WIDTH) return false;
+        }
+
+        // Check for collisions
+        if (grid && grid.isOccupied(newCol2, newRow2)) {
+            console.log(`Capsule: canRotate: grid.isOccupied(${newCol2}, ${newRow2}) = ${grid.isOccupied(newCol2, newRow2)}`);
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Moves the capsule on column left
+     * @param grid The game grid to check collisions against
+     * @returns True if move was successful
+     */
+    public moveLeft(grid?: GameGrid): boolean {
+        if (!this.canMoveLeft(grid)) return false;
+
+        this.setGridPosition(this.gridCol - 1, this.gridRow);
+        return true;
+    }
+
+    /**
+     * Moves the capsule on column right
+     * @param grid The game grid to check collisions against
+     * @returns True if move was successful
+     */
+    public moveRight(grid?: GameGrid): boolean {
+        if (!this.canMoveRight(grid)) return false;
+
+        this.setGridPosition(this.gridCol + 1, this.gridRow);
+        return true;
+    }
+
+    /**
+     * Moves the capsule one row down
+     * @param grid The game grid to check collisions against
+     * @returns True if move was successful
+     */
+    public moveDown(grid?: GameGrid): boolean {
+        if (!this.canMoveDown(grid)) return false;
+
+        this.setGridPosition(this.gridCol, this.gridRow + 1);
+        return true;
+    }
+
+    /**
+     * Separates the capsule into two individual pieces
+     */
+    public separateHalves(): void {
+        // Converts halves into single pieces
+        this.half1.convertToSingle();
+        this.half2.convertToSingle();
+
+        // Remove this capsule (but keep the halves)
+        this.isFalling = false;
+        this.kill();
+    }
+}
+
+
+
+// src/entities/Pathogen.ts
+// Pathogen Entity
+
+import { Actor, Animation, AnimationStrategy, vec } from 'excalibur';
+import { Resources } from '../resources/Resources';
+import { GameConfig } from '../config/GameConfig';
+
+/**
+ * Represents a pathogen that needs to be cleared from the field
+ */
+export class Pathogen extends Actor {
+    // Which color this pathogen is (0=pink, 1=blue, 2=yellow)
+    public readonly colorIndex: number;
+
+    // Grid position of this pathogen
+    public gridCol: number;
+    public gridRow: number;
+
+    /**
+     * Creates a new pathogen at the specified grid position
+     * @param colorIndex Color of the pathogen (0=pink, 1=blue, 2=yellow)
+     * @param gridCol Column position in the grid (0-7)
+     * @param gridRow Row position in the grid (0-15)
+     */
+    constructor(colorIndex: number, gridCol: number, gridRow: number) {
+        super({
+            // Size matches our tile size
+            width: GameConfig.TILE_SIZE,
+            height: GameConfig.TILE_SIZE,
+
+            // Position will be set properly when added to scene
+            pos: vec(0, 0),
+
+            // Name for debugging
+            name: `pathogen-${colorIndex}-${gridCol},${gridRow}`
+        });
+
+        this.colorIndex = colorIndex;
+        this.gridCol = gridCol;
+        this.gridRow = gridRow;
+    }
+
+    /**
+     * Sets up the pathogens' animation when first created
+     */
+    public onInitialize(): void {
+        // Create an animation frame from the 4 frames
+        const frames = []
+        for (let frame = 0; frame < 4; frame++) {
+            const spriteIndex = Resources.getPathogenSprite(this.colorIndex, frame);
+            const sprite = Resources.SpriteSheet.sprites[spriteIndex];            
+            if (sprite) {
+                frames.push(sprite);
+            }
+        }
+
+        // Create the animation
+        // Each frame lasts 500ms, creating a wiggling effect
+        const wiggleAnimation = new Animation({
+            frames: frames.map(sprite => ({
+                graphic: sprite,
+                duration: 500
+            })),
+            strategy: AnimationStrategy.Loop    // Loop forever
+        });
+
+        // Use the animation
+        this.graphics.use(wiggleAnimation);
+
+        // Set a slightly random animation offset so they don't all wiggle in sync
+        // This makes the field look more organic
+        wiggleAnimation.goToFrame(Math.floor(Math.random() * 4));
+    }
+
+    /**
+     * Updates the pathogen's grid position (used when falling)
+     * @param gridCol New column position
+     * @param gridRow New row position
+     */
+    public updateGridPosition(newCol: number, newRow: number): void {
+        this.gridCol = newCol;
+        this.gridRow = newRow;
+
+        // Update the actor name for debugging
+        this.name = `pathogen-${this.colorIndex}-${this.gridCol},${this.gridRow}`;
+    }
+
+    /**
+     * Gets the human-readable color name
+     * @returns Color name as string
+     */
+    public getColorName(): string {
+        switch (this.colorIndex) {
+            case 0: return 'Hot Pink';
+            case 1: return 'Sky Blue';
+            case 2: return 'Pear';
+            default: return 'Unknown';
+        }
+    }
+
+    /**
+     * Gets the hex color value for this pathogen
+     * @returns Hex color string
+     */
+    public getColorHex(): string {
+        return GameConfig.COLOR_VALUES[this.colorIndex];
+    }
+}
+
+
+
+// src/game/GameGrid.ts
+// Game Grid System
+
+import { GameConfig } from "../config/GameConfig";
+import { Pathogen } from "../entities/Pathogen";
+import { CapsuleHalf } from "../entities/Capsule";
+
+/**
+ * Represents what can be in a grid cell
+ */
+type GridCell = Pathogen | CapsuleHalf | null;
+
+/**
+ * Manages the game playing field grid and what's in each cell
+ */
+export class GameGrid {
+    // 2D array representing the playing field
+    // [column (0-7)][row (0-15)]
+    private grid: GridCell[][];
+
+    /**
+    * Creates a new empty game grid
+    */
+    constructor() {
+        // Initialize empty grid
+        this.grid = [];
+        for (let col = 0; col < GameConfig.FIELD_WIDTH; col++) {
+            this.grid[col] = [];
+            for (let row = 0; row < GameConfig.FIELD_HEIGHT; row++) {
+                this.grid[col][row] = null;
+            }
+        }
+        console.log('GameGrid: Grid initialized');
+        console.table(this.grid);
+    }
+
+    /**
+     * Clears all contents from the grid
+     */
+    public clear(): void {
+        for (let col = 0; col < GameConfig.FIELD_WIDTH; col++) {
+            for (let row = 0; row < GameConfig.FIELD_HEIGHT; row++) {
+                this.grid[col][row] = null;
+            }
+        }
+        console.log('GameGrid: clear - Grid cleared');
+        console.table(this.grid);
+    }
+
+    /**
+     * Gets the contents of a cell
+     * @param col Column (0-7)
+     * @param row Row (0-15)
+     * @returns Contents of the cell or null if empty/out of bounds
+     */
+    public get(col: number, row: number): GridCell {
+        // Check bounds
+        if (col < 0 || col >= GameConfig.FIELD_WIDTH ||
+            row < 0 || row >= GameConfig.FIELD_HEIGHT) {
+            return null;
+        }
+        console.log('GameGrid: get - Getting cell contents');
+        console.table(this.grid);
+
+        return this.grid[col][row];
+    }
+
+    /**
+     * Sets the contents of a cell
+     * @param col Column (0-7)
+     * @param row Row (0-15)
+     * @param content What to put in the cell
+     * @returns True if successful, false if out of bounds
+     */
+    public set(col: number, row: number, content: GridCell): boolean {
+        // Check bounds
+        if (col < 0 || col >= GameConfig.FIELD_WIDTH ||
+            row < 0 || row >= GameConfig.FIELD_HEIGHT) {
+            return false;
+        }
+
+        this.grid[col][row] = content;
+        
+        // Update the entity's grid position if it's a pathogen
+        if (content instanceof Pathogen) {
+            content.updateGridPosition(col, row);
+        }
+
+        console.log(`GameGrid: set - cell (${col}, ${row}) updated with ${content}`);
+        // console.table(this.grid);
+
+        return true;
+    }
+
+    /**
+     * Removes content from a cell
+     * @param col Column (0-7)
+     * @param row Row (0-15)
+     * @returns The removed content, or null if cell was empty
+     */
+    public remove(col: number, row: number): GridCell {
+        const content = this.get(col, row);
+        this.set(col, row, null);
+
+        console.log(`GameGrid: remove - cell (${col}, ${row}) set to null`);
+        // console.table(this.grid);
+
+        return content;
+    }
+
+    /**
+     * Checks if a cell is occupied
+     * @col Column (0-7)
+     * @row Row (0-15)
+     * @returns True if cell has content, false if empty or out of bounds
+     */
+    public isOccupied(col: number, row: number): boolean {
+        const occupied = this.get(col, row) !== null;
+        console.log(`GameGrid.isOccupied(${col}, ${row}) = ${occupied}`);
+        return occupied;
+    }
+
+    /**
+     * Checks if a cell is empty
+     * @col Column (0-7)
+     * @row Row (0-15)
+     * @returns True if cell is empty or out of bounds, false if occupied
+     */
+    public isEmpty(col: number, row: number): boolean {
+        const empty = this.get(col, row) === null;
+        console.log(`GameGrid.isEmpty(${col}, ${row}) = ${empty}`);
+        return empty;
+    }
+
+    /**
+     * Counts how many pathogens are currently on the field
+     * @returns Number of pathogens
+     */
+    public countPathogens(): number {
+        let count = 0;
+        for (let col = 0; col < GameConfig.FIELD_WIDTH; col++) {
+            for (let row = 0; row < GameConfig.FIELD_HEIGHT; row++) {
+                if (this.grid[col][row] instanceof Pathogen) {
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+
+    /**
+     * Gets all pathogens currently on the field
+     * @returns Array of all pathogens
+     */
+    public getPathogens(): Pathogen[] {
+        const pathogens: Pathogen[] = [];
+        for (let col = 0; col < GameConfig.FIELD_WIDTH; col++) {
+            for (let row = 0; row < GameConfig.FIELD_HEIGHT; row++) {
+                const cell = this.grid[col][row];
+                if (cell instanceof Pathogen) {
+                    pathogens.push(cell);
+                }
+            }
+        }
+        return pathogens;
+    }
+
+    /**
+     * Checks if the bottle neck area is clear (for game over detection)
+     * @returns True if bottle neck is clear, false if occupied
+     */
+    public isBottleNeckClear(): boolean {
+        // Check all cells above and including the bottle neck row
+        for (let col = 0; col < GameConfig.FIELD_WIDTH; col++) {
+            for (let row = 0; row < GameConfig.BOTTLE_NECK_ROW; row++) {
+                if (this.isOccupied(col, row)) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+}
+
+
+
+// src/resources/Resources.ts
+// Resource Manager
+
+import { ImageSource, Loader, SpriteSheet } from 'excalibur';
+
+/**
+ * Manages all game resources like images, sounds, and sprite sheets
+ */
+export class Resources {
+    // Image sources - these load the actual image files
+    public static readonly SpriteSheetImage = new ImageSource('./images/sprites/png/sprite_sheet.png');
+
+    // Sprite sheet - this will be initialized after the image loads
+    public static SpriteSheet: SpriteSheet;
+
+    // Resource loader - Excalibur's built-in loading screen
+    public static readonly ResourceLoader = new Loader([
+        Resources.SpriteSheetImage
+        // We'll add more resources here later (sounds, music, etc.)
+    ]);
+
+    /**
+     * Sets up sprite sheets after images are loaded
+     */
+    public static initialize(): void {
+        // Check if the image is actually loaded
+        if (!Resources.SpriteSheetImage.isLoaded()) {
+            console.log('Sprite sheet image not loaded!');
+            return;
+        }
+
+        // Create the sprite sheet with 32x32 sprites in a 4x7 grid
+        Resources.SpriteSheet = SpriteSheet.fromImageSource({
+            image: Resources.SpriteSheetImage,
+            grid: {
+                rows: 7,
+                columns: 4,
+                spriteWidth: 32,
+                spriteHeight: 32
+            }
+        });
+
+        console.log('Sprite sheet initialized with', Resources.SpriteSheet.sprites.length, 'sprites');
+    }
+
+    /**
+     * Gets a specific capsule sprite from the sheet
+     * @param color Color index (0=pink, 1=blue, 2=yellow)
+     * @param orientation 'horizontal' or 'vertical'
+     * @param half 'left', 'right', 'top', 'bottom'
+     * @returns Sprite index of the sprite sheet
+     */
+    public static getCapsuleSprite(color: number, orientation: 'horizontal' | 'vertical', half: 'left' | 'right' | 'top' | 'bottom'): number {
+        // Base row for the color (0 for pink, 1 for blue, 2 for yellow)
+        const row = color;
+
+        // Column based on oritentation and half
+        let col = 0;
+        if (orientation === 'horizontal') {
+            col = half === 'left' ? 0 : 1;
+        } else {
+            col = half === 'top' ? 2: 3;
+        }
+
+        // Convert row,col to sprite index (row * columns + col)
+        return row * 4 + col;
+    }
+
+    /**
+     * Gets a half capsule sprite (for separated pieces)
+     * @param color Color index (0=pink, 1=blue, 2=yellow)
+     * @param returns Sprite index of the sprite sheet
+     */
+    public static getHalfCapsuleSprite(color: number): number {
+        // Half capsules are in row 3, columns 0-2
+        return 3 * 4 + color;
+    }
+
+    /**
+     * Gets a pathogen sprite for animation
+     * @param color Color index (0=pink, 1=blue, 2=yellow)
+     * @param frame Animation frame (0-3)
+     * @returns Sprite index in the sprite sheet
+     */
+    public static getPathogenSprite(color: number, frame: number): number {
+        // Pathogens start at row 4 for pink, row 5 for blue, row 6 for yellow
+        const row = 4 + color;
+        // Frame determines the column (0-3)
+        const col = frame;
+
+        // Convert row,col to sprite index
+        return row * 4 + col;
+    }
+}
+
+
+
+// src/scenes/GameScene.ts
+
+import { Scene, Engine, Color, Actor, Rectangle, vec, Vector, Keys, KeyEvent, Text, Font } from 'excalibur';
+import { GameConfig } from '../config/GameConfig';
+import { GameGrid } from '../game/GameGrid';
+import { Pathogen } from '../entities/Pathogen';
+import { Capsule } from '../entities/Capsule';
+
+/**
+ * The main gameplay scene
+ */
+export class GameScene extends Scene {
+    // Game state
+    private level: number = 0;
+    private speed: 'LOW' | 'MEDIUM' | 'HIGH' = 'LOW';
+    // Score will be used when we implement scoring system
+    // private score: number = 0;
+
+    // Playing field boundaries
+    private fieldX: number = 0;
+    private fieldY: number = 0;
+
+    // Game grid to track what's in each cell
+    private grid: GameGrid = new GameGrid();
+
+    // Current falling capsule
+    private currentCapsule: Capsule | null = null;
+
+    // Input handling
+    private keyHeldTime: Map<Keys, number> = new Map();
+    private keyRepeatTime: Map<Keys, number> = new Map();
+
+    // Falling mechanics
+    private fallTimer: number = 0;
+    private fallSpeed: number = GameConfig.SPEEDS.LOW;  // TODO: Should this be a function of level and speed?
+    
+    /**
+     * Called once when the scene is first initialized
+     * @param engine The game engine instance
+     */
+    public onInitialize(engine: Engine): void {
+        // Calculate the playing field position (centered)
+        this.fieldX = (engine.drawWidth - (GameConfig.FIELD_WIDTH * GameConfig.TILE_SIZE)) / 2;
+        this.fieldY = (engine.drawHeight - (GameConfig.FIELD_HEIGHT * GameConfig.TILE_SIZE)) / 2;
+
+        this.createPlayingField(engine);    // Draw the playing field background        
+        this.createBottleNeck(engine);      // Draw the bottle neck indicator
+        this.createSpeedDisplay(engine);    // Draw the speed display
+
+        // Set up keyboard input handlers
+        engine.input.keyboard.on('press', (evt: KeyEvent) => this.handleKeyPress(evt));
+        engine.input.keyboard.on('release', (evt: KeyEvent) => this.handleKeyRelease(evt));
+    }
+
+    /**
+     * Called when the scene becomes active (when we transition to it)
+     * @param context Scene activation context with data from previous scene
+     */
+    public onActivate(context: any): void {
+        // Get the level and speed from the main menu
+        if (context?.sceneActivationData) {
+            this.level = context.data.level || 0;
+            this.speed = context.data.speed || 'LOW';
+        }
+
+        // Reset score
+        // this.score = 0;
+
+        // Set fall speed based on selected speed
+        this.fallSpeed = GameConfig.SPEEDS[this.speed];
+        this.fallTimer = 0;
+
+        // Initialize the game with selected settings
+        console.log(`Game started! Level: ${this.level}, Speed: ${this.speed}`);
+        console.log(`Need to clear ${GameConfig.PATHOGENS_PER_LEVEL(this.level)} pathogens`);
+
+        this.clearField();  // Clear any existing pathogens
+        this.generatePathogens();   // Generate random pathogens for this level
+        this.spawnNewCapsule(); // Spawn the first capsule
+    }
+
+    /**
+     * Called every frame before update
+     * @param engine The game engine instance
+     * @param delta Time elapsed since last frame in milliseconds
+     */
+    public onPreUpdate(_engine: Engine, delta: number): void {
+        // Handle held keys for continuous movement
+        this.handleHeldKeys(delta);
+
+        // Handle automatic falling
+        this.handleAutomaticFalling(delta);
+    }
+
+    /**
+     * Makes the current capsule fall automatically based on speed setting
+     */
+    private handleAutomaticFalling(delta: number): void {
+        if (!this.currentCapsule || !this.currentCapsule.isFalling) return;
+
+        // Update fall timer
+        this.fallTimer += delta;
+
+        // Check if it's time to fall
+        if (this.fallTimer >= this.fallSpeed) {
+            this.fallTimer = 0;     // Reset timer
+            this.moveCapsuleDown(); // Try to move down
+        }
+    }
+    
+
+    /**
+     * Handles initial key press
+     * @param evt Keyboard event
+     */
+    private handleKeyPress(evt: KeyEvent): void {
+        if (!this.currentCapsule || !this.currentCapsule.isFalling) return;
+
+        switch (evt.key) {
+            case Keys.Left:
+            case Keys.ArrowLeft:
+                this.moveCapsuleLeft();
+                this.keyHeldTime.set(evt.key, 0);
+                this.keyRepeatTime.set(evt.key, 0);
+                break;
+            
+            case Keys.Right:
+            case Keys.ArrowRight:
+                this.moveCapsuleRight();
+                this.keyHeldTime.set(evt.key, 0);
+                this.keyRepeatTime.set(evt.key, 0);
+                break;
+            
+            case Keys.Down:
+            case Keys.ArrowDown:
+                this.moveCapsuleDown();
+                this.keyHeldTime.set(evt.key, 0);
+                this.keyRepeatTime.set(evt.key, 0);
+                break;
+            
+            case Keys.Up:
+            case Keys.ArrowUp:
+            case Keys.Space:
+                this.rotateCapsule();
+                break;
+        }
+    }
+
+    /**
+     * Handles key release
+     * @param evt Keyboard event
+     */
+    private handleKeyRelease(evt: KeyEvent): void {
+        this.keyHeldTime.delete(evt.key);
+        this.keyRepeatTime.delete(evt.key);
+    }
+
+    /**
+     * Handles continuous movement for held keys
+     * @param delta Time since last frame
+     */
+    private handleHeldKeys(delta: number): void {
+        if (!this.currentCapsule || !this.currentCapsule.isFalling) return;
+
+        // Check each held key
+        for (const [key, heldTime] of this.keyHeldTime) {
+            // Update held time
+            this.keyHeldTime.set(key, heldTime + delta);
+
+            const newHeldTime = this.keyHeldTime.get(key) || 0;
+            const repeatTime = this.keyRepeatTime.get(key) || 0;
+
+            // Check if we should repeat the action
+            if (newHeldTime >= GameConfig.INPUT_REPEAT_DELAY) {
+                if (repeatTime >= GameConfig.INPUT_REPEAT_RATE) {
+                    // Reset repeat timer and perform action
+                    this.keyRepeatTime.set(key, 0);
+
+                    switch (key) {
+                        case Keys.Left:
+                        case Keys.ArrowLeft:
+                            this.moveCapsuleLeft();
+                            break;
+                        
+                        case Keys.Right:
+                        case Keys.ArrowRight:
+                            this.moveCapsuleRight();
+                            break;
+                        
+                        case Keys.Down:
+                        case Keys.ArrowDown:
+                            this.moveCapsuleDown(true); // Pass true for soft drop
+                            break;
+                    }
+                } else {
+                    // Update repeat timer
+                    this.keyRepeatTime.set(key, repeatTime + delta);
+                }
+            }
+            
+        }
+    }
+
+    /**
+     * Moves the current capsule left if possible
+     */
+    private moveCapsuleLeft(): void {
+        if (!this.currentCapsule) return;
+
+        if (this.currentCapsule.moveLeft(this.grid)) {
+            // Update visual positions
+            this.updateCapsuleVisualPosition();
+        }
+    }
+
+    /**
+     * Moves the current capsule right if possible
+     */
+    private moveCapsuleRight(): void {
+        if (!this.currentCapsule) return;
+
+        if (this.currentCapsule.moveRight(this.grid)) {
+            // Update visual positions
+            this.updateCapsuleVisualPosition();
+        }
+    }
+
+    /**
+     * Moves the current capsule down if possible
+     * @param isSoftDrop Whether this is a soft drop (player holding down)
+     */
+    private moveCapsuleDown(isSoftDrop: boolean = false): void {
+        if (!this.currentCapsule) return;
+
+        if (this.currentCapsule.moveDown(this.grid)) {
+            // Update visual positions
+            this.updateCapsuleVisualPosition();
+
+            // If this is a soft drop, reset the fall timer
+            // This prevents the capsule from getting an extra automatic drop
+            if (isSoftDrop) {
+                this.fallTimer = 0;
+            }
+        } else {
+            // Can't move down - capsule has landed
+            this.landCapsule();
+        }
+    }
+
+    /**
+     * Rotates the current capsule if possible
+     */
+    private rotateCapsule(): void {
+        if (!this.currentCapsule) return;
+
+        if (this.currentCapsule.rotate(this.grid)) {
+            // Update visual positions
+            this.updateCapsuleVisualPosition();
+        }
+    }
+
+    /**
+     * Updates the visual position of the capsule halves
+     */
+    private updateCapsuleVisualPosition(): void {
+        if (!this.currentCapsule) return;
+
+        this.currentCapsule.half1.pos = this.gridToScreen(
+            this.currentCapsule.half1.gridCol,
+            this.currentCapsule.half1.gridRow            
+        );
+        this.currentCapsule.half2.pos = this.gridToScreen(
+            this.currentCapsule.half2.gridCol,
+            this.currentCapsule.half2.gridRow
+        );
+    }
+
+    /**
+     * Handles when a capsule lands and can't fall anymore
+     */
+    private landCapsule(): void {
+        if (!this.currentCapsule) return;
+
+        console.log('Capsule landed!');
+
+        // Mark as not falling
+        this.currentCapsule.isFalling = false;
+
+        // Add both halves to the grid
+        this.grid.set(
+            this.currentCapsule.half1.gridCol,
+            this.currentCapsule.half1.gridRow,
+            this.currentCapsule.half1
+        );
+        this.grid.set(
+            this.currentCapsule.half2.gridCol,
+            this.currentCapsule.half2.gridRow,
+            this.currentCapsule.half2
+        );
+
+        // TODO: Check for matches
+        // TODO: Apply gravity
+
+        // Clear current capsule reference
+        this.currentCapsule = null;
+
+        // TODO: Check for game over
+
+        // Spawn a new capsule
+        this.spawnNewCapsule();
+    }
+
+    /**
+     * Creates the visual representation of the playing field/bottle
+     * @param engine The game engine instance
+     */
+    private createPlayingField(engine: Engine): void {
+        // Create the main playing field background
+        const fieldWidth = GameConfig.FIELD_WIDTH * GameConfig.TILE_SIZE;
+        const fieldHeight = GameConfig.FIELD_HEIGHT * GameConfig.TILE_SIZE;
+        
+        // Dark background for the playing field
+        const fieldBg = new Rectangle({
+            width: fieldWidth,
+            height: fieldHeight,
+            color: Color.fromRGB(20, 20, 40)    // Slightly ligher than main background
+        });
+
+        const field = new Actor({
+            pos: vec(engine.halfDrawWidth, engine.halfDrawHeight),
+            width: fieldWidth,
+            height: fieldHeight
+        });
+        field.graphics.use(fieldBg);
+        this.add(field);
+
+        // Add a border around the field
+        this.createFieldBorder(engine, fieldWidth, fieldHeight);
+
+        // Add grid lines for debugging (we can remove these later)
+        this.createGridLines(engine);
+    }
+
+    /**
+     * Creates a decorative border around the playing field
+     * @param engine The game engine instance
+     * @param fieldWidth Width of the playing field
+     * @param fieldHeight Height of the playing field
+     */
+    private createFieldBorder(engine: Engine, fieldWidth: number, fieldHeight: number): void {
+        const borderThickness = 3;
+        const borderColor = Color.fromHex(GameConfig.COLORS.BORDER);
+
+        // Top bordder
+        const topBorder = new Actor({
+            pos: vec(engine.halfDrawWidth, this.fieldY - borderThickness/2),
+            width: fieldWidth + borderThickness * 2,
+            height: borderThickness
+        });
+        topBorder.graphics.use(new Rectangle({
+            width: fieldWidth + borderThickness * 2,
+            height: borderThickness,
+            color: borderColor
+        }));
+        this.add(topBorder);
+
+        // Bottom border
+        const bottomBorder = new Actor({
+            pos: vec(engine.halfDrawWidth, this.fieldY + fieldHeight + borderThickness/2),
+            width: fieldWidth + borderThickness * 2,
+            height: borderThickness
+        });
+        bottomBorder.graphics.use(new Rectangle({
+            width: fieldWidth + borderThickness * 2,
+            height: borderThickness,
+            color: borderColor
+        }));
+        this.add(bottomBorder);
+
+        // Left border
+        const leftBorder = new Actor({
+            pos: vec(this.fieldX - borderThickness/2, engine.halfDrawHeight),
+            width: borderThickness,
+            height: fieldHeight + borderThickness * 2
+        });
+        leftBorder.graphics.use(new Rectangle({
+            width: borderThickness,
+            height: fieldHeight,
+            color: borderColor
+        }));
+        this.add(leftBorder);
+
+        // Right border
+        const rightBorder = new Actor({
+            pos: vec(this.fieldX + fieldWidth + borderThickness/2, engine.halfDrawHeight),
+            width: borderThickness,
+            height: fieldHeight
+        });
+        rightBorder.graphics.use(new Rectangle({
+            width: borderThickness,
+            height: fieldHeight,
+            color: borderColor
+        }));
+        this.add(rightBorder);
+    }
+
+    /**
+     * Creates a display showing the current game speed
+     * @param engine The game engine instance
+     */
+    private createSpeedDisplay(engine: Engine): void {
+        // Create speed label
+        const speedLabel = new Text({
+            text: `Speed: ${this.speed}`,
+            font: new Font({
+                size: 16,
+                color: Color.fromHex(GameConfig.COLORS.PEAR),
+                family: 'Arial'
+            })
+        });
+
+        // Position it in the top right corner
+        const speedActor = new Actor({
+            pos: vec(engine.drawWidth - 60, 30),
+            name: 'speed-display'
+        });
+        speedActor.graphics.use(speedLabel);
+        this.add(speedActor);
+
+        // Create level label
+        const levelLabel = new Text({
+            text: `Level: ${this.level}`,
+            font: new Font({
+                size: 16,
+                color: Color.fromHex(GameConfig.COLORS.SKY_BLUE),
+                family: 'Arial'
+            })
+        });
+
+        // Position it below speed
+        const levelActor = new Actor({
+            pos: vec(engine.drawWidth - 60, 50),
+            name: 'level-display'
+        })
+        levelActor.graphics.use(levelLabel);
+        this.add(levelActor);
+    }
+
+    /**
+     * Removes all entities from the playing field
+     */
+    private clearField(): void {
+        // Get all pathogens from the grid
+        const pathogens = this.grid.getPathogens();
+
+        // Remove each pathogen from the scene
+        pathogens.forEach(pathogen => {
+            this.remove(pathogen);
+            pathogen.kill();
+        });
+
+        // Clear the grid
+        this.grid.clear();
+    }
+
+    /**
+     * Generates random pathogens for the current level
+     */
+    private generatePathogens(): void {
+        const pathogenCount = GameConfig.PATHOGENS_PER_LEVEL(this.level);
+        
+        // Keep track of occupied positions to avoid overlaps
+        const occupiedPositions = new Set<string>();
+
+        let placed = 0;
+        let attemps = 0;
+        const maxAttempts = 1000;   // Prevent infinite loop
+
+        while (placed < pathogenCount && attemps < maxAttempts) {
+            attemps++;
+
+            // Random position in the lower 2/3 of the field
+            // We don't want pathogens too high at the start
+            const col = Math.floor(Math.random() * GameConfig.FIELD_WIDTH);
+            const row = Math.floor(Math.random() * 10) + 6; // Rows 6-15
+            // TODO: Implement mechanic where the pathogens grow higher as the level increases
+
+            // Check if position is already occupied
+            const posKey = `${col},${row}`;
+            if (occupiedPositions.has(posKey)) {
+                continue;
+            }
+
+            // Random color
+            const colorIndex = Math.floor(Math.random() * 3);
+
+            // Create the pathogen
+            const pathogen = new Pathogen(colorIndex, col, row);
+
+            // Position it on screen
+            pathogen.pos = this.gridToScreen(col, row);
+
+            // Add to grid and scene
+            this.grid.set(col, row, pathogen);
+            this.add(pathogen);
+
+            // Mark position as occupied
+            occupiedPositions.add(posKey);
+            placed++;
+        }
+
+        console.log(`Placed ${placed} pathogens on the field`);
+    }
+
+    /**
+     * Creates a visual indicator for the bottle neck (game over line)
+     * @param engine The game engine instance
+     */
+    private createBottleNeck(_engine: Engine): void {
+        // Calculate Y position of the bottle neck
+        const neckY = this.fieldY + (GameConfig.BOTTLE_NECK_ROW * GameConfig.TILE_SIZE);
+
+        // Create a subtle line to show the danger zone
+        // Make it a dashed line effect by creating multiple small segments
+        const dashWidth = 10;
+        const gapWidth = 5;
+        const totalWidth = GameConfig.FIELD_WIDTH * GameConfig.TILE_SIZE;
+
+        for (let x = 0; x < totalWidth; x += dashWidth + gapWidth) {
+            const dash = new Rectangle({
+                width: dashWidth,
+                height: 1,
+                color: Color.fromHex(GameConfig.COLORS.HOT_PINK).darken(0.5)
+            });
+
+            const dashActor = new Actor({
+                pos: vec(this.fieldX + x + dashWidth/2, neckY),
+                width: dashWidth,
+                height: 1
+            });
+            dashActor.graphics.use(dash);
+            this.add(dashActor);
+        }
+    }
+
+    /**
+     * Creates grid lines for debugging - shows tile boundaries
+     * @param engine The game engine instance
+     */
+    private createGridLines(engine: Engine): void {
+        const gridColor = Color.Gray.darken(0.7);   // Very subtle grid
+
+        // Vertical lines
+        for (let col = 1; col < GameConfig.FIELD_WIDTH; col++) {
+            const x = this.fieldX + (col * GameConfig.TILE_SIZE);
+            const line = new Actor({
+                pos: vec(x, engine.halfDrawHeight),
+                width: 1,
+                height: GameConfig.FIELD_HEIGHT * GameConfig.TILE_SIZE
+            });
+            line.graphics.use(new Rectangle({
+                width: 1,
+                height: GameConfig.FIELD_HEIGHT * GameConfig.TILE_SIZE,
+                color: gridColor
+            }));
+            this.add(line);
+        }
+
+        // Horizontal lines
+        for (let row = 1; row < GameConfig.FIELD_HEIGHT; row++) {
+            const y = this.fieldY + (row * GameConfig.TILE_SIZE);
+            const line = new Actor({
+                pos: vec(engine.halfDrawWidth, y),
+                width: GameConfig.FIELD_WIDTH * GameConfig.TILE_SIZE,
+                height: 1
+            });
+            line.graphics.use(new Rectangle({
+                width: GameConfig.FIELD_WIDTH * GameConfig.TILE_SIZE,
+                height: 1,
+                color: gridColor
+            }));
+            this.add(line);
+        }
+    }
+
+    /**
+     * Converts grid coordinates to screen coordinates
+     * @param col Column in the grid (0-7)
+     * @param row Row in the grid (0-15)
+     * @returns {Vector} Screen coordinates as a vector
+     */
+    public gridToScreen(col: number, row: number): Vector {
+        // Calculate the center position of a tile at the given grid coordinates
+        const x = this.fieldX + (col * GameConfig.TILE_SIZE) + (GameConfig.TILE_SIZE / 2);
+        const y = this.fieldY + (row * GameConfig.TILE_SIZE) + (GameConfig.TILE_SIZE / 2);
+        return vec(x, y);
+    }
+    
+    /**
+     * Converts screen coordinates to grid coordinates
+     * @param x Screen X position
+     * @param y Screen Y position
+     * @returns Grid coordinates as {col, row} or null if outside grid
+     */
+    public screenToGrid(x: number, y: number): {col: number, row: number} | null {
+        // Calculate which grid cell contains the given screen positions
+        const col = Math.floor((x - this.fieldX) / GameConfig.TILE_SIZE);
+        const row = Math.floor((y - this.fieldY) / GameConfig.TILE_SIZE);
+        
+        // Check if the position is within the grid bounds
+        if (col >= 0 && col < GameConfig.FIELD_WIDTH && row >= 0 && row < GameConfig.FIELD_HEIGHT) {
+            return {col, row};
+        }
+
+        return null;    // Outside the grid
+    }
+
+    /**
+     * Spawns a new capsule at the top of the field
+     */
+    private spawnNewCapsule(): void {
+        // Random colors for both halves
+        const color1 = Math.floor(Math.random() * 3);
+        const color2 = Math.floor(Math.random() * 3);        
+        
+        // Create new capsule
+        this.currentCapsule = new Capsule(color1, color2, 'horizontal');
+        
+        // Start at the top center of the field
+        const startCol = Math.floor(GameConfig.FIELD_WIDTH / 2) - 1;
+        const startRow = 0;
+
+        // Set position
+        this.currentCapsule.setGridPosition(startCol, startRow);
+
+        // Check if the spawn position is already occupied (game over)
+        if (this.grid.isOccupied(this.currentCapsule.half1.gridCol, this.currentCapsule.half1.gridRow) ||
+            this.grid.isOccupied(this.currentCapsule.half2.gridCol, this.currentCapsule.half2.gridRow)) {
+            console.log('GAME OVER!');
+            this.handleGameOver();
+            return;
+        }
+
+        // Update visual positions
+        this.currentCapsule.half1.pos = this.gridToScreen(
+            this.currentCapsule.half1.gridCol,
+            this.currentCapsule.half1.gridRow
+        );
+        this.currentCapsule.half2.pos = this.gridToScreen(
+            this.currentCapsule.half2.gridCol,
+            this.currentCapsule.half2.gridRow
+        );
+
+        // Add to scene
+        this.add(this.currentCapsule);
+
+        // Don't add to grid yet - it's falling
+        console.log(`Spawned new capsule with colors ${color1} and ${color2}`);
+    }
+
+    /**
+     * Handles the game over state
+     */
+    private handleGameOver(): void {
+        // Stop the current capsule from falling   
+        if (this.currentCapsule) {
+            this.currentCapsule.isFalling = false;
+            this.currentCapsule.kill();
+            this.currentCapsule = null;
+        }
+
+        // TODO: Show game over screen
+        // TODO: Play game over sound
+        // For now, just log and go back to menu after a delay
+        console.log('Game Over!');
+
+        // Return to menu after 3 seconds
+        setTimeout(() => {
+            this.engine.goToScene('mainMenu');
+        }, 3000);
+    }
+}
+
+
+
+// src/scenes/MainMenuScene.ts
+
+import { Scene, Engine, Color, Text, Font, vec, Actor, Rectangle } from 'excalibur';
+import { GameConfig } from '../config/GameConfig';
+
+/**
+ * The main menu where players select level and speed before starting
+ */
+export class MainMenuScene extends Scene {
+    // Currently selected options
+    private selectedLevel: number = 0;
+    private selectedSpeed: 'LOW' | 'MEDIUM' | 'HIGH' = 'LOW';
+
+    // UI elements that we'll update
+    private levelText!: Text;
+    private speedText!: Text;
+
+    /**
+     * Called once when the game is first initialized
+     * @param engine The game engine instance
+     */
+    public onInitialize(engine: Engine): void {
+        this.createTitle(engine);           // Create the title text
+        this.createLevelSelector(engine);   // Create the level selector
+        this.createSpeedSelector(engine);   // Create the speed selector
+        this.createStartButton(engine);     // Create the start button
+        this.createInstructions(engine);    // Create instructions
+    }
+
+    /**
+     * Creates the game title display
+     * @param engine The game engine instance
+     */
+    private createTitle(engine: Engine): void {
+        // Main title
+        const title = new Text({
+            text: 'DR. RODGER',
+            font: new Font({
+                size: 36,
+                color: Color.fromHex(GameConfig.COLORS.HOT_PINK),
+                family: 'Arial',
+                bold: true
+            })
+        });
+
+        // Create an actor to hold the text
+        const titleActor = new Actor({
+            pos: vec(engine.halfDrawWidth, 60)
+        });
+        titleActor.graphics.use(title);
+        this.add(titleActor);
+
+        // Subtitle
+        const subtitle = new Text({
+            text: 'Idk what to put here',
+            font: new Font({
+                size: 16,
+                color: Color.fromHex(GameConfig.COLORS.SKY_BLUE),
+                family: 'Arial',
+            })
+        });
+
+        const subtitleActor = new Actor({
+            pos: vec(engine.halfDrawWidth, 90)
+        });
+        subtitleActor.graphics.use(subtitle);
+        this.add(subtitleActor);
+    }
+
+    /**
+     * Creates the level selection UI
+     * @param engine The game engine instance
+     */
+    private createLevelSelector(engine: Engine): void {
+        // Level label
+        const levelLabel = new Text({
+            text: 'LEVEL:',
+            font: new Font({
+                size: 20,
+                color: Color.White,
+                family: 'Arial'
+            })
+        });
+
+        const levelLabelActor = new Actor({
+            pos: vec(engine.halfDrawWidth - 60, 200)
+        });
+        levelLabelActor.graphics.use(levelLabel);
+        this.add(levelLabelActor);
+
+        // Level value (this will be updated)
+        this.levelText = new Text({
+            text: this.selectedLevel.toString(),
+            font: new Font({
+                size: 20,
+                color: Color.fromHex(GameConfig.COLORS.PEAR),
+                family: 'Arial',
+                bold: true
+            })
+        });
+
+        const levelValueActor = new Actor({
+            pos: vec(engine.halfDrawWidth + 10, 200)
+        });
+        levelValueActor.graphics.use(this.levelText);
+        this.add(levelValueActor);
+
+        // Left arrow button
+        this.createButton(
+            engine,
+            '<',
+            engine.halfDrawWidth - 120,
+            200,
+            () => this.changeLevel(-1)
+        );
+
+        // Right arrow button
+        this.createButton(
+            engine,
+            '>',
+            engine.halfDrawWidth + 80,
+            200,
+            () => this.changeLevel(1)
+        );
+    }
+
+    /**
+     * Creates the speed selection UI
+     * @param engine The game engine instance
+     */
+    private createSpeedSelector(engine: Engine): void {
+        // Speed label
+        const speedLabel = new Text({
+            text: 'SPEED:',
+            font: new Font({
+                size: 20,
+                color: Color.White,
+                family: 'Arial'
+            })
+        });
+
+        const speedLabelActor = new Actor({
+            pos: vec(engine.halfDrawWidth - 60, 260)
+        });
+        speedLabelActor.graphics.use(speedLabel);
+        this.add(speedLabelActor);
+
+        // Speed value
+        this.speedText = new Text({
+            text: this.selectedSpeed,
+            font: new Font({
+                size: 20,
+                color: Color.fromHex(GameConfig.COLORS.PEAR),
+                family: 'Arial',
+                bold: true
+            })
+        });
+
+        const speedValueActor = new Actor({
+            pos: vec(engine.halfDrawWidth + 20, 260)
+        });
+        speedValueActor.graphics.use(this.speedText);
+        this.add(speedValueActor);
+
+        // Speed buttons
+        this.createButton(
+            engine,
+            '<',
+            engine.halfDrawWidth - 120,
+            260,
+            () => this.changeSpeed(-1)
+        );
+
+        this.createButton(
+            engine,
+            '>',
+            engine.halfDrawWidth + 120,
+            260,
+            () => this.changeSpeed(1)
+        );
+    }
+
+    /**
+     * Creates the start button
+     * @param engine The game engine instance
+     */
+    private createStartButton(engine: Engine): void {
+        // Create a Larger button for starting the game
+        const buttonBg = new Rectangle({
+            width: 120,
+            height: 40,
+            color: Color.fromHex(GameConfig.COLORS.HOT_PINK)
+        });
+
+        const startButton = new Actor({
+            pos: vec(engine.halfDrawWidth, 340),
+            width: 120,
+            height: 40
+        });
+        startButton.graphics.use(buttonBg);
+
+        // Enable pointer events
+        startButton.pointer.useGraphicsBounds = true;
+        startButton.pointer.useColliderShape = true;
+
+        // Make it clickable
+        startButton.on('pointerup', () => {
+            this.startGame(engine);
+        });
+
+        this.add(startButton);
+
+        // Add text to the button (as a separate actor on top)
+        const buttonText = new Text({
+            text: 'START',
+            font: new Font({
+                size: 24,
+                color: Color.White,
+                family: 'Arial',
+                bold: true
+            })
+        });
+
+        const textActor = new Actor({
+            pos: vec(engine.halfDrawWidth, 340),
+            z: 1    // Ensure text is on top
+        });
+        textActor.graphics.use(buttonText);
+        this.add(textActor);
+    }
+
+    /**
+     * Creates the instruction text
+     * @param engine The game engine instance
+     */
+    private createInstructions(engine: Engine): void {
+        const instructions = [
+            'Clear all pathogens to win!',
+            'Match 4 colors in a row',
+            '← → to move, ↑ to rotate'
+        ];
+
+        instructions.forEach((text, index) => {
+            const instruction = new Text({
+                text: text,
+                font: new Font({
+                    size: 14,
+                    color: Color.Gray,
+                    family: 'Arial'
+                })
+            });
+
+            const actor = new Actor({
+                pos: vec(engine.halfDrawWidth, 420 + (index * 25))
+            });
+            actor.graphics.use(instruction);
+            this.add(actor);
+        });
+    }
+
+    /**
+     * Helper method to create clickable buttons
+     * @param engine The game engine instance
+     * @param text Button text
+     * @param x x position
+     * @param y y position
+     * @param onClick Click handler function
+     */
+    private createButton(_engine: Engine, text: string, x: number, y: number, onClick: () => void): void {
+        // Button background
+        const buttonBg = new Rectangle({
+            width: 30,
+            height: 30,
+            color: Color.fromHex(GameConfig.COLORS.SKY_BLUE)
+        });
+
+        const button = new Actor({
+            pos: vec(x, y),
+            width: 30,
+            height: 30
+        });
+        button.graphics.use(buttonBg);
+
+        // Enable pointer events
+        button.pointer.useGraphicsBounds = true;
+
+        // Make it clickable
+        button.on('pointerup', onClick);
+
+        this.add(button);
+
+        // Button text (add after button so it's on top)
+        const buttonText = new Text({
+            text: text,
+            font: new Font({
+                size: 20,
+                color: Color.White,
+                family: 'Arial',
+                bold: true
+            })
+        });
+
+        const textActor = new Actor({
+            pos: vec(x, y),
+            z: 1    // Ensure text is on top
+        });
+        textActor.graphics.use(buttonText);
+        
+        this.add(textActor);
+    }
+
+    /**
+     * Changes the selected level
+     * @param delta Amount to change by (-1 or 1)
+     */
+    private changeLevel(delta: number): void {
+        // Update the level, keeping it within bounds
+        this.selectedLevel = Math.max(
+            GameConfig.MIN_LEVEL,
+            Math.min(GameConfig.MAX_LEVEL, this.selectedLevel + delta)
+        );
+
+        // Update the display
+        this.levelText.text = this.selectedLevel.toString();
+    }
+
+    /**
+     * Changes the selected speed
+     * @param delta Direction to change (-1 or 1)
+     */
+    private changeSpeed(delta: number): void {
+        // Speed options in order
+        const speeds: Array<'LOW' | 'MEDIUM' | 'HIGH'> = ['LOW', 'MEDIUM', 'HIGH'];
+        const currentIndex = speeds.indexOf(this.selectedSpeed);
+
+        // Calculated new index with wrapping
+        let newIndex = currentIndex + delta;
+        if (newIndex < 0) newIndex = speeds.length - 1;
+        if (newIndex >= speeds.length) newIndex = 0;
+
+        // Update speed
+        this.selectedSpeed = speeds[newIndex];
+        this.speedText.text = this.selectedSpeed;
+    }
+
+    /**
+     * Starts the game with selected settings
+     * @param engine The game engine instance
+     */
+    private startGame(engine: Engine): void {
+        // Store the selected options (we'll pass these to the game scene later)
+        console.log(`Starting game - Level: ${this.selectedLevel}, Speed: ${this.selectedSpeed}`);
+
+        // Go to the game scene
+        engine.goToScene('game', {
+            sceneActivationData: {
+                level: this.selectedLevel,
+                speed: this.selectedSpeed
+            }
+        });
+    }
+}
+
+
+
+// src/main.ts
+
+// Import Excalibur game engine and configurations
+import { Engine, DisplayMode, Color } from 'excalibur';
+import { Resources } from './resources/Resources';
+import { GameConfig } from './config/GameConfig';
+import { MainMenuScene } from './scenes/MainMenuScene';
+import { GameScene } from './scenes/GameScene';
+
+/**
+ * Creates and configures the main Excalibur game engine instance
+ * @returns {game} The configured Excalibur Engine instance
+ */
+function createGame(): Engine {
+    // Get the canvas element
+    const canvas = document.getElementById('game') as HTMLCanvasElement;
+    if (!canvas) {
+        throw new Error('Canvas element with id "game" not found');
+    }
+    
+    // Create the main game engine with our configuration
+    const game = new Engine({
+        width: GameConfig.GAME_WIDTH,           // Set the game dimensions from our config
+        height: GameConfig.GAME_HEIGHT,         // ...
+        displayMode: DisplayMode.FitScreen,     // To scale the game to fit the container, which maintains aspect ratio and centers the game
+        backgroundColor: Color.fromHex(GameConfig.COLORS.BACKGROUND),   // Set the background color to our dark theme
+        antialiasing: false,                    // Disable anti-aliasing for crisp pixel art
+        canvasElement: canvas,                  // Attach the game canvas to our HTML container
+        suppressPlayButton: true                // Disable the default Excalibur loader (we'll make our own later)
+    });
+
+    return game;
+}
+
+/**
+ * Creates and adds all game scenes to the engine
+ * @param game The Excalibur engine instance
+ */
+function setupScenes(game: Engine): void {
+    // Create the main menu scene where players select level and speed
+    const mainMenu = new MainMenuScene();
+    game.addScene('mainMenu', mainMenu);
+
+    // Create the main game scene where gameplay happens
+    const gameScene = new GameScene();
+    game.addScene('game', gameScene);
+
+    // Notes: We'll add more scenes later (game over, pause, etc.)
+}
+
+/**
+ * Main entry point for the game - initializes and starts everything
+ */
+async function main(): Promise<void> {
+    const game = createGame();      // Create the game engine
+    setupScenes(game);              // Set up all the game scenes
+    await game.start(Resources.ResourceLoader); // Start the game engine and load resources using the ResourceLoader
+    Resources.initialize();         // After resources are loaded, initialize the SpriteSheet
+    game.goToScene('mainMenu');     // Go to the main menu scene
+    console.log('Dr. Rodger game started! 🏳️‍🌈'); // Log to console that the game has started successfully
+}
+
+// Start the game when the page loads
+// The 'DOMContentLoaded' event ensures the HTML is fully loaded first
+document.addEventListener('DOMContentLoaded', () => {
+    main().catch(error => {
+        console.error('Failed to start game:', error);
+    });
+});
+
+
+
+[index.html]
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Dr. Rodger</title>
+        <style>
+            body {
+                margin: 0;
+                padding: 0;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: 100vh;  /* Full viewport height */
+                background-color: #1a1a2e; /* Dark background */
+                font-family: Ariel, sans-serif;
+                overflow: hidden;
+            }
+
+            #game {
+                border: 3px solid #FF00AA;
+                box-shadow: 0 0 20px rgba(255, 0, 170, 0.5);
+                max-width: 100vw;
+                max-height: calc(100vh - 100px);    /* Leave room for title */
+            }
+
+            h1 {
+                color: #FF00AA;
+                text-align: center;
+                margin: 20px 0;
+                text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+                font-size: 2em;
+            }
+
+            .game-wrapper {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                height: 100vh;
+                padding: 10px;
+                box-sizing: border-box;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="game-wrapper">
+            <h1>Dr. Rodger</h1>
+            <canvas id="game"></canvas>
+        </div>
+        <script type="module" src="/src/main.ts"></script>
+    </body>
+</html>
+
+
+

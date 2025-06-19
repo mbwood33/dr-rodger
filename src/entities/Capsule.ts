@@ -2,6 +2,7 @@
 import { Actor, Rectangle, Color } from 'excalibur';
 import { Resources } from '../resources/Resources';
 import { GameConfig } from '../config/GameConfig';
+import { GameGrid } from '../game/GameGrid';
 
 /**
  * The orientation of a capsule
@@ -105,6 +106,9 @@ export class Capsule extends Actor {
     // Current orientation
     public orientation: CapsuleOrientation = 'horizontal';
 
+    // Which half is "first" (determines rotation state)
+    private half1IsFirst: boolean = true;
+
     // Grid position (of the first half)
     public gridCol: number = 0;
     public gridRow: number = 0;
@@ -168,16 +172,24 @@ export class Capsule extends Actor {
 
     /**
      * Rotates the capsule 90 degrees clockwise
+     * @param grid The game grid to check collisions against
      * @returns True if rotation was successful
      */
-    public rotate(): boolean {
-        // Toggle orientation
-        const newOrientation: CapsuleOrientation =
-            this.orientation === 'horizontal' ? 'vertical' : 'horizontal';
+    public rotate(grid?: GameGrid): boolean {
+        // Check if rotation is valid
+        if (!this.canRotate(grid)) return false;
         
-        // Check if rotation is valid (we'll implement collision checking later)
-        // For now, just rotate
-        this.orientation = newOrientation;
+        // Perform 90-degree clockwise rotation
+        if (this.orientation === 'horizontal') {
+            // Horizontal to vertical
+            this.orientation = 'vertical';
+            // Keep the same "first" half
+        } else {
+            // Vertical to horizontal
+            this.orientation = 'horizontal';
+            this.half1IsFirst = !this.half1IsFirst;
+        }
+
         this.updateHalfPositions();
         this.updateHalfSprites();
         
@@ -188,18 +200,34 @@ export class Capsule extends Actor {
      * Updates the positions of both halves based on orientation
      */
     private updateHalfPositions(): void {
-        // Update grid positions
-        this.half1.gridCol = this.gridCol;
-        this.half1.gridRow = this.gridRow;
-        
-        if (this.orientation === 'horizontal') {
-            // Second half is to the right
-            this.half2.gridCol = this.gridCol + 1;
-            this.half2.gridRow = this.gridRow;
+        if (this.half1IsFirst) {
+            // Half1 is at the base position
+            this.half1.gridCol = this.gridCol;
+            this.half1.gridRow = this.gridRow;
+
+            if (this.orientation === 'horizontal') {
+                // Half2 is to the right
+                this.half2.gridCol = this.gridCol + 1;
+                this.half2.gridRow = this.gridRow;
+            } else {
+                // Half2 is below
+                this.half2.gridCol = this.gridCol;
+                this.half2.gridRow = this.gridRow + 1;
+            }
         } else {
-            // Second half is below
+            // Half2 is at the base position
             this.half2.gridCol = this.gridCol;
-            this.half2.gridRow = this.gridRow + 1;
+            this.half2.gridRow = this.gridRow;
+
+            if (this.orientation === 'horizontal') {
+                // Half1 is to the right
+                this.half1.gridCol = this.gridCol + 1;
+                this.half1.gridRow = this.gridRow;
+            } else {
+                // Half1 is below
+                this.half1.gridCol = this.gridCol;
+                this.half1.gridRow = this.gridRow + 1;
+            }
         }
     }
 
@@ -207,58 +235,158 @@ export class Capsule extends Actor {
      * Updates the sprites of both halves
      */
     private updateHalfSprites(): void {
-        this.half1.updateSprite(this.orientation, true);
-        this.half2.updateSprite(this.orientation, false);
+        if (this.half1IsFirst) {
+            this.half1.updateSprite(this.orientation, true);
+            this.half2.updateSprite(this.orientation, false);
+        } else {
+            this.half1.updateSprite(this.orientation, false);
+            this.half2.updateSprite(this.orientation, true);
+        }
     }
 
     /**
      * Checks if the capsule can move left
+     * @param grid The game grid to check collisions against
      * @returns True if move is valid
      */
-    public canMoveLeft(): boolean {
+    public canMoveLeft(grid?: GameGrid): boolean {
         // Check boundaries
         if (this.gridCol <= 0) return false;
 
-        // TODO: Check for collisions with other objects
+        // Check for collisions with other objects
+        if (grid) {
+            // For horizontal capsules, we need to check the leftmost position
+            // For vertical capsules, both halves are in the same column
+            if (this.orientation === 'horizontal') {
+                // Only need to check the left half's new position
+                if (grid.isOccupied(this.gridCol - 1, this.gridRow)) {
+                    console.log(`Capsule: canMoveLeft (horizontal): grid.isOccupied(${this.gridCol - 1}, ${this.gridRow}) = ${grid.isOccupied(this.gridCol - 1, this.gridRow)}`);
+                    return false;
+                }
+            } else {
+                // Vertical - check both halves at the new column
+                if (grid.isOccupied(this.gridCol - 1, this.gridRow) ||
+                    grid.isOccupied(this.gridCol - 1, this.gridRow + 1)) {
+                    console.log(`Capsule: canMoveLeft (vertical 1/2): grid.isOccupied(${this.gridCol - 1}, ${this.gridRow}) = ${grid.isOccupied(this.gridCol - 1, this.gridRow)}`);
+                    console.log(`Capsule: canMoveLeft (vertical 2/2): grid.isOccupied(${this.gridCol - 1}, ${this.gridRow + 1}) = ${grid.isOccupied(this.gridCol - 1, this.gridRow + 1)}`);
+                    return false;
+                }
+            }
+        }
+
         return true;
     }
 
     /**
      * Checks if the capsule can move right
+     * @param grid The game grid to check collisions against
      * @returns True if move is valid
      */
-    public canMoveRight(): boolean {
+    public canMoveRight(grid?: GameGrid): boolean {
         // Check boundaries
-        const rightmostCol = this.orientation === 'horizontal' ?
-            this.half2.gridCol : this.gridCol;
+        if (this.orientation === 'horizontal') {
+            if (this.gridCol + 1 >= GameConfig.FIELD_WIDTH - 1) return false;
+        } else {
+            if (this.gridCol >= GameConfig.FIELD_WIDTH - 1) return false;
+        }
 
-        if (rightmostCol >= GameConfig.FIELD_WIDTH - 1) return false;
+        // Check for collisions with other objects
+        if (grid) {
+            if (this.orientation === 'horizontal') {
+                // Only need to check the right half's new position
+                if (grid.isOccupied(this.gridCol + 2, this.gridRow)) {
+                    console.log(`Capsule: canMoveRight (horizontal): grid.isOccupied(${this.gridCol - 2}, ${this.gridRow}) = ${grid.isOccupied(this.gridCol - 2, this.gridRow)}`);
+                    return false;
+                }
+            } else {
+                // Vertical - check both halves at the new column
+                if (grid.isOccupied(this.gridCol + 1, this.gridRow) ||
+                    grid.isOccupied(this.gridCol + 1, this.gridRow + 1)) {
+                    console.log(`Capsule: canMoveRight (vertical 1/2): grid.isOccupied(${this.gridCol + 1}, ${this.gridRow}) = ${grid.isOccupied(this.gridCol + 1, this.gridRow)}`);
+                    console.log(`Capsule: canMoveRight (vertical 2/2): grid.isOccupied(${this.gridCol + 1}, ${this.gridRow + 1}) = ${grid.isOccupied(this.gridCol + 1, this.gridRow + 1)}`);
+                    return false;
+                }
+            }
+        }
 
-        // TODO: Check for collisions with other objects
         return true;
     }
 
     /**
      * Checks if the capsule can move down
+     * @param grid The game grid to check collisions against
      * @returns True if move is valid
      */
-    public canMoveDown(): boolean {
+    public canMoveDown(grid?: GameGrid): boolean {
         // Check boundaries
-        const bottomRow = this.orientation === 'vertical' ?
-            this.half2.gridRow : this.gridRow;
-        
-        if (bottomRow >= GameConfig.FIELD_HEIGHT - 1) return false;
+        if (this.orientation === 'horizontal') {
+            if (this.gridRow + 1 >= GameConfig.FIELD_HEIGHT) return false;
+        } else {
+            if (this.gridRow + 2 >= GameConfig.FIELD_HEIGHT) return false;
+        }
 
-        // TODO: Check for collisions with other objects
+        // Check for collisions with other objects
+        if (grid) {
+            if (this.orientation === 'horizontal') {
+                // Check both halves at the new row
+                if (grid.isOccupied(this.gridCol, this.gridRow + 1) ||
+                    grid.isOccupied(this.gridCol + 1, this.gridRow + 1)) {
+                    console.log(`Capsule: canMoveDown (horizontal 1/2): grid.isOccupied(${this.gridCol}, ${this.gridRow + 1}) = ${grid.isOccupied(this.gridCol, this.gridRow + 1)}`);
+                    console.log(`Capsule: canMoveDown (horizontal 2/2): grid.isOccupied(${this.gridCol + 1}, ${this.gridRow + 1}) = ${grid.isOccupied(this.gridCol + 1, this.gridRow + 1)}`);
+                    return false;
+                }
+            } else {
+                // Vertical - only need to check the bottom half's new position
+                if (grid.isOccupied(this.gridCol, this.gridRow + 2)) {
+                    console.log(`Capsule: canMoveDown (vertical): grid.isOccupied(${this.gridCol}, ${this.gridRow + 2}) = ${grid.isOccupied(this.gridCol, this.gridRow + 2)}`);
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Checks if the capsule can rotate
+     * @param grid The game grid to check collisions against
+     * @returns True if rotation is valid
+     */
+    public canRotate(grid?: GameGrid): boolean {
+        // Calculate new position after rotation
+        let newCol2 = this.gridCol;
+        let newRow2 = this.gridRow;
+
+        if (this.orientation === 'horizontal') {
+            // Currently horizontal, would become vertical
+            newRow2 = this.gridRow + 1;
+
+            // Check if it would go out of bounds
+            if (newRow2 >= GameConfig.FIELD_HEIGHT) return false;
+        } else {
+            // Current vertical, would become horizontal
+            newCol2 = this.gridCol + 1;
+
+            // Check if it would go out of bounds
+            if (newCol2 >= GameConfig.FIELD_WIDTH) return false;
+        }
+
+        // Check for collisions
+        if (grid && grid.isOccupied(newCol2, newRow2)) {
+            console.log(`Capsule: canRotate: grid.isOccupied(${newCol2}, ${newRow2}) = ${grid.isOccupied(newCol2, newRow2)}`);
+            return false;
+        }
+
         return true;
     }
 
     /**
      * Moves the capsule on column left
+     * @param grid The game grid to check collisions against
      * @returns True if move was successful
      */
-    public moveLeft(): boolean {
-        if (!this.canMoveLeft()) return false;
+    public moveLeft(grid?: GameGrid): boolean {
+        if (!this.canMoveLeft(grid)) return false;
 
         this.setGridPosition(this.gridCol - 1, this.gridRow);
         return true;
@@ -266,10 +394,11 @@ export class Capsule extends Actor {
 
     /**
      * Moves the capsule on column right
+     * @param grid The game grid to check collisions against
      * @returns True if move was successful
      */
-    public moveRight(): boolean {
-        if (!this.canMoveRight()) return false;
+    public moveRight(grid?: GameGrid): boolean {
+        if (!this.canMoveRight(grid)) return false;
 
         this.setGridPosition(this.gridCol + 1, this.gridRow);
         return true;
@@ -277,10 +406,11 @@ export class Capsule extends Actor {
 
     /**
      * Moves the capsule one row down
+     * @param grid The game grid to check collisions against
      * @returns True if move was successful
      */
-    public moveDown(): boolean {
-        if (!this.canMoveDown()) return false;
+    public moveDown(grid?: GameGrid): boolean {
+        if (!this.canMoveDown(grid)) return false;
 
         this.setGridPosition(this.gridCol, this.gridRow + 1);
         return true;

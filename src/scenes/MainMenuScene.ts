@@ -52,7 +52,7 @@ export class MainMenuScene extends Scene {
 
         // Subtitle
         const subtitle = new Text({
-            text: 'Generic subtitle here...',
+            text: 'Idk what to put here',
             font: new Font({
                 size: 16,
                 color: Color.fromHex(GameConfig.COLORS.SKY_BLUE),
@@ -83,7 +83,7 @@ export class MainMenuScene extends Scene {
         });
 
         const levelLabelActor = new Actor({
-            pos: vec(engine.halfDrawWidth - 50, 150)
+            pos: vec(engine.halfDrawWidth - 60, 200)
         });
         levelLabelActor.graphics.use(levelLabel);
         this.add(levelLabelActor);
@@ -100,7 +100,7 @@ export class MainMenuScene extends Scene {
         });
 
         const levelValueActor = new Actor({
-            pos: vec(engine.halfDrawWidth + 20, 150)
+            pos: vec(engine.halfDrawWidth + 10, 200)
         });
         levelValueActor.graphics.use(this.levelText);
         this.add(levelValueActor);
@@ -110,7 +110,7 @@ export class MainMenuScene extends Scene {
             engine,
             '<',
             engine.halfDrawWidth - 120,
-            150,
+            200,
             () => this.changeLevel(-1)
         );
 
@@ -118,8 +118,8 @@ export class MainMenuScene extends Scene {
         this.createButton(
             engine,
             '>',
-            engine.halfDrawWidth + 120,
-            150,
+            engine.halfDrawWidth + 80,
+            200,
             () => this.changeLevel(1)
         );
     }
@@ -140,7 +140,7 @@ export class MainMenuScene extends Scene {
         });
 
         const speedLabelActor = new Actor({
-            pos: vec(engine.halfDrawWidth - 50, 200)
+            pos: vec(engine.halfDrawWidth - 60, 260)
         });
         speedLabelActor.graphics.use(speedLabel);
         this.add(speedLabelActor);
@@ -157,7 +157,7 @@ export class MainMenuScene extends Scene {
         });
 
         const speedValueActor = new Actor({
-            pos: vec(engine.halfDrawWidth + 30, 200)
+            pos: vec(engine.halfDrawWidth + 20, 260)
         });
         speedValueActor.graphics.use(this.speedText);
         this.add(speedValueActor);
@@ -167,7 +167,7 @@ export class MainMenuScene extends Scene {
             engine,
             '<',
             engine.halfDrawWidth - 120,
-            200,
+            260,
             () => this.changeSpeed(-1)
         );
 
@@ -175,7 +175,7 @@ export class MainMenuScene extends Scene {
             engine,
             '>',
             engine.halfDrawWidth + 120,
-            200,
+            260,
             () => this.changeSpeed(1)
         );
     }
@@ -193,13 +193,24 @@ export class MainMenuScene extends Scene {
         });
 
         const startButton = new Actor({
-            pos: vec(engine.halfDrawWidth, 280),
+            pos: vec(engine.halfDrawWidth, 340),
             width: 120,
             height: 40
         });
         startButton.graphics.use(buttonBg);
 
-        // Add text to the button
+        // Enable pointer events
+        startButton.pointer.useGraphicsBounds = true;
+        startButton.pointer.useColliderShape = true;
+
+        // Make it clickable
+        startButton.on('pointerup', () => {
+            this.startGame(engine);
+        });
+
+        this.add(startButton);
+
+        // Add text to the button (as a separate actor on top)
         const buttonText = new Text({
             text: 'START',
             font: new Font({
@@ -211,17 +222,11 @@ export class MainMenuScene extends Scene {
         });
 
         const textActor = new Actor({
-            pos: vec(engine.halfDrawWidth, 280)
+            pos: vec(engine.halfDrawWidth, 340),
+            z: 1    // Ensure text is on top
         });
         textActor.graphics.use(buttonText);
         this.add(textActor);
-
-        // Make it clickable
-        startButton.on('pointerup', () => {
-            this.startGame(engine);
-        });
-
-        this.add(startButton);
     }
 
     /**
@@ -246,7 +251,7 @@ export class MainMenuScene extends Scene {
             });
 
             const actor = new Actor({
-                pos: vec(engine.halfDrawWidth, 350 + (index * 25))
+                pos: vec(engine.halfDrawWidth, 420 + (index * 25))
             });
             actor.graphics.use(instruction);
             this.add(actor);
@@ -276,7 +281,15 @@ export class MainMenuScene extends Scene {
         });
         button.graphics.use(buttonBg);
 
-        // Button text
+        // Enable pointer events
+        button.pointer.useGraphicsBounds = true;
+
+        // Make it clickable
+        button.on('pointerup', onClick);
+
+        this.add(button);
+
+        // Button text (add after button so it's on top)
         const buttonText = new Text({
             text: text,
             font: new Font({
@@ -293,10 +306,6 @@ export class MainMenuScene extends Scene {
         });
         textActor.graphics.use(buttonText);
         
-        // Make it clickable
-        button.on('pointerup', onClick);
-
-        this.add(button);
         this.add(textActor);
     }
 
